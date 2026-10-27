@@ -49,6 +49,13 @@ export class Capri {
     this.restOn = 'corner'; // where she rests when nothing's going on: her corner, or 'taskbar' (her menu)
     this.nextHome = 0;
     this.dragging = false;
+    this.vx = 0;
+    this.vy = 0;
+    this.vRot = 0;
+    this.bounces = 0;
+    this.flung = false;
+    this.edgeHits = 0;
+    this.onFlingHit = null;
 
     this.p = {
       seed: 0, boil: 0.9, hair: 0, head: 0, mane: 0, armL: 0, armR: 0, longL: 1, longR: 1, sit: 0, kickL: 0, kickR: 0,
@@ -178,6 +185,15 @@ export class Capri {
     if (this.upside) {
       x = 2 * this.pos.x - x;
       y = 2 * fy - y;
+    }
+    if (this.tilt) {
+      const rad = (-this.tilt * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      const dx = x - this.pos.x;
+      const dy = y - fy;
+      x = this.pos.x + dx * cos - dy * sin;
+      y = fy + dx * sin + dy * cos;
     }
     const sx = SPRITE.feet.x + ((x - this.pos.x) / s) * this.facing;
     let sy = SPRITE.feet.y - (fy - y) / s;
@@ -310,7 +326,8 @@ export class Capri {
   // ---------- frame loop ----------
 
   interval() {
-    if (this.busy || this.stance === 'fall' || this.act?.player.act.fps === 24) return ON_ONES;
+    if (this.stance === 'fall') return 0;
+    if (this.busy || this.act?.player.act.fps === 24) return ON_ONES;
     return this.mode === 'sleep' ? ASLEEP : ON_TWOS;
   }
 
@@ -370,10 +387,16 @@ export class Capri {
     p.kickR = pose.kickR;
     p.smear = pose.smear;
     p.echo = pose.echo;
+    if (this.stance === 'fall' && (Math.abs(this.vx) > 50 || Math.abs(this.vy) > 100)) {
+      p.smear = [-clamp(this.vx * 0.01, -14, 14), -clamp(this.vy * 0.012, -18, 18)];
+      p.echo = [-clamp(this.vx * 0.005, -8, 8), -clamp(this.vy * 0.006, -10, 10)];
+    }
     // on a ledge she stays seated: no lifting off it, no sinking through it
     const bob = this.stance === 'sit' ? clamp(pose.bob, -3, 2) : pose.bob;
     this.bob = this.dragging ? 0 : bob;
-    this.tilt = this.dragging ? 0 : pose.tilt;
+    if (this.stance !== 'fall' && !this.dragging) {
+      this.tilt = pose.tilt;
+    }
     this.sx = pose.sx;
     this.sy = pose.sy;
     if (this.debug) Object.assign(p, this.debug); // --dev pose overrides
@@ -1372,30 +1395,209 @@ export class Capri {
     return { y: this.floor, stance: 'stand', perch: null };
   }
 
-  fall() {
-    if (this.stance === 'fall') return;
+  fall({ vx = 0, vy = 0, flung = false } = {}) {
+    if (this.stance === 'fall') {
+      this.vx = vx;
+      this.vy = vy;
+      this.flung = flung;
+      this.bounces = 0;
+      return;
+    }
     if (this.sky) this.endAct(false);
     this.landingSpot = this.landing();
     this.setStance('fall');
-    this.vy = 0;
+    this.vx = vx;
+    this.vy = vy;
+    this.flung = flung;
+    this.bounces = 0;
+    this.edgeHits = 0;
+    this.vRot = flung ? clamp(vx * 0.15, -420, 420) : 0;
     this.lastFall = performance.now();
+    if (flung) {
+      this.voice.play('rise');
+      if (Math.hypot(vx, vy) > 650) {
+        this.voice.play('blip', { mood: 'alert' });
+      }
+      this.p.glitch = 0.22;
+      setTimeout(() => { this.p.glitch = 0; }, 120);
+      this.fx.burst(this.pos.x, this.pos.y - 40 * this.scale, { count: 8, power: 0.5, spread: 30 * this.scale });
+    }
     if (reducedMotion.matches) this.updateFall(this.lastFall + 10000);
   }
 
+  fling(vx, vy) {
+    this.fall({ vx, vy, flung: true });
+  }
+
   updateFall(now) {
-    const target = this.landingSpot;
-    const dt = Math.min(0.05, (now - this.lastFall) / 1000);
+    const dt = Math.min(0.04, (now - this.lastFall) / 1000);
     this.lastFall = now;
-    this.vy = Math.min(this.vy + GRAVITY * dt, 1900);
-    const y = reducedMotion.matches ? target.y : this.pos.y + this.vy * dt;
-    if (y < target.y) {
-      this.pos.y = y;
+    if (dt <= 0) return;
+
+    const s = this.scale;
+    if (reducedMotion.matches) {
+      const spot = this.landingSpot || this.landing();
+      this.pos = { x: clamp(this.pos.x, 60, this.view.w - 60), y: spot.y };
+      this.settleLanded(spot.stance, spot.perch);
       return;
     }
-    this.pos.y = target.y;
-    this.setStance(target.stance, { perch: target.perch });
+
+    // 1. Gravity
+    this.vy = Math.min(this.vy + GRAVITY * dt, 2600);
+
+    // 2. Air resistance / damping
+    this.vx *= Math.pow(0.985, dt * 60);
+
+    // 3. Rotation & tilt dynamics
+    if (Math.abs(this.vRot) > 5) {
+      this.tilt += this.vRot * dt;
+      this.vRot *= Math.pow(0.90, dt * 60);
+    } else {
+      const targetTilt = clamp(this.vx * 0.04, -30, 30);
+      this.tilt = lerp(this.tilt, targetTilt, 0.18);
+    }
+
+    // Facing direction matches travel if moving horizontally
+    if (Math.abs(this.vx) > 30) {
+      this.faceToward(this.pos.x + this.vx);
+    }
+
+    const prevX = this.pos.x;
+    const prevY = this.pos.y;
+    let nextX = prevX + this.vx * dt;
+    let nextY = prevY + this.vy * dt;
+
+    const minX = 40 * s + 15;
+    const maxX = this.view.w - (40 * s + 15);
+    const minY = SPRITE.feet.y * s + 10;
+    const maxY = this.floor;
+
+    // 4. Side walls collision & bounce
+    if (nextX <= minX && this.vx < 0) {
+      nextX = minX;
+      this.vx = -this.vx * 0.58;
+      if (this.flung) {
+        this.edgeHits = (this.edgeHits || 0) + 1;
+        this.onFlingHit?.(this.edgeHits);
+      }
+      this.voice.play('tick');
+      this.voice.play('blip', { mood: 'alert' });
+      if (Math.abs(this.vx) > 120) {
+        this.fx.burst(minX, nextY - 120 * s, { count: 8, power: 0.5, spread: 30 * s });
+        this.p.glitch = 0.22;
+        setTimeout(() => { this.p.glitch = 0; }, 70);
+        this.vRot = (this.vy > 0 ? 1 : -1) * clamp(Math.abs(this.vx) * 0.8, 150, 400);
+      }
+    } else if (nextX >= maxX && this.vx > 0) {
+      nextX = maxX;
+      this.vx = -this.vx * 0.58;
+      if (this.flung) {
+        this.edgeHits = (this.edgeHits || 0) + 1;
+        this.onFlingHit?.(this.edgeHits);
+      }
+      this.voice.play('tick');
+      this.voice.play('blip', { mood: 'alert' });
+      if (Math.abs(this.vx) > 120) {
+        this.fx.burst(maxX, nextY - 120 * s, { count: 8, power: 0.5, spread: 30 * s });
+        this.p.glitch = 0.22;
+        setTimeout(() => { this.p.glitch = 0; }, 70);
+        this.vRot = (this.vy > 0 ? -1 : 1) * clamp(Math.abs(this.vx) * 0.8, 150, 400);
+      }
+    }
+
+    // 5. Ceiling collision & bounce
+    if (nextY <= minY && this.vy < 0) {
+      nextY = minY;
+      this.vy = Math.abs(this.vy) * 0.45;
+      if (this.flung) {
+        this.edgeHits = (this.edgeHits || 0) + 1;
+        this.onFlingHit?.(this.edgeHits);
+      }
+      this.voice.play('tick');
+      this.voice.play('blip', { mood: 'alert' });
+      if (Math.abs(this.vy) > 150) {
+        this.fx.burst(nextX, 20, { count: 8, power: 0.5, spread: 40 * s });
+        this.p.glitch = 0.2;
+        setTimeout(() => { this.p.glitch = 0; }, 70);
+        this.vRot = (Math.random() - 0.5) * 260;
+      }
+    }
+
+    // 6. Window ledges (perch or skim while descending)
+    if (this.vy > 0) {
+      const hipOffset = (SPRITE.feet.y - SPRITE.hip) * s;
+      const prevHip = prevY - hipOffset;
+      const nextHip = nextY - hipOffset;
+
+      for (const win of this.windows.wins) {
+        if (!this.canSit(win)) continue;
+        if (prevHip <= win.y + 6 && nextHip >= win.y - 6) {
+          if (nextX >= win.x + 40 && nextX <= win.x + win.w - 40 && !this.covered(win, nextX)) {
+            if (Math.abs(this.vx) < 550) {
+              const dx = clamp(nextX - win.x, 40, win.w - 40);
+              this.pos = this.seat(win, dx);
+              this.settleLanded('sit', { id: win.id, dx });
+              return;
+            } else {
+              nextY = this.seat(win, nextX - win.x).y - 2;
+              this.vy = -Math.abs(this.vy) * 0.38;
+              this.vx *= 0.68;
+              this.voice.play('tick');
+              this.fx.burst(nextX, win.y, { count: 6, power: 0.4, spread: 25 });
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // 7. Floor collision & landing
+    if (nextY >= maxY) {
+      nextY = maxY;
+      if (this.vy > 320 && (this.bounces || 0) < 3) {
+        this.bounces = (this.bounces || 0) + 1;
+        if (this.flung) {
+          this.edgeHits = (this.edgeHits || 0) + 1;
+          this.onFlingHit?.(this.edgeHits);
+        }
+        this.vy = -this.vy * 0.36;
+        this.vx *= 0.65;
+        this.vRot *= 0.4;
+        this.fx.burst(nextX, maxY - 15 * s, { count: 8, power: 0.4, spread: 40 * s });
+        this.voice.play('tick');
+        this.voice.play('blip', { mood: 'alert' });
+        this.p.glitch = 0.18;
+        setTimeout(() => { this.p.glitch = 0; }, 60);
+      } else {
+        if (Math.abs(this.vx) > 160) {
+          this.vx *= Math.pow(0.85, dt * 60);
+          this.vy = 0;
+          this.tilt = clamp(this.vx * 0.03, -20, 20);
+        } else {
+          this.pos = { x: nextX, y: maxY };
+          this.settleLanded('stand', null);
+          return;
+        }
+      }
+    }
+
+    this.pos = { x: nextX, y: nextY };
+    this.place();
+  }
+
+  settleLanded(stance, perch) {
+    this.vx = 0;
+    this.vy = 0;
+    this.vRot = 0;
+    this.tilt = 0;
+    this.bounces = 0;
+    this.flung = false;
+    this.edgeHits = 0;
+    this.p.smear = [0, 0];
+    this.p.echo = [0, 0];
+    this.setStance(stance, { perch });
     const s = this.scale;
-    if (target.stance === 'sit') {
+    if (stance === 'sit') {
       this.perform('plop');
     } else {
       this.perform('land');
@@ -1406,6 +1608,8 @@ export class Capri {
     p.glitchSeed = Math.random() * 100;
     p.glitch = 0.3;
     setTimeout(() => { p.glitch = 0; }, ON_ONES * 3);
+    this.onTeleport?.('end');
+    this.place();
   }
 
   // First appearance: drop in from the top of the screen.
@@ -1572,19 +1776,40 @@ export class Capri {
 
   bindPointer() {
     let down = null;
+    let pointerHistory = [];
     const onContextMenu = (e) => {
       e.preventDefault();
       if (this.hit(e.clientX, e.clientY)) this.onMenu?.(); // right-click: her menu
     };
     const onMouseDown = (e) => {
       if (e.button !== 0 || this.busy || !this.hit(e.clientX, e.clientY)) return;
+      if (this.mode === 'sleep') this.wake();
+      if (this.stance === 'fall') {
+        this.vx = 0;
+        this.vy = 0;
+        this.vRot = 0;
+        this.tilt = 0;
+        this.flung = false;
+        this.bounces = 0;
+        this.edgeHits = 0;
+        this.p.smear = [0, 0];
+        this.p.echo = [0, 0];
+        this.setStance('stand');
+      }
       down = { x: e.clientX, y: e.clientY, pos: { ...this.pos } };
+      pointerHistory = [{ x: e.clientX, y: e.clientY, t: performance.now() }];
     };
     this.canvas.addEventListener('contextmenu', onContextMenu);
     this.canvas.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', (e) => {
       this.mouse = { x: e.clientX, y: e.clientY }; // a window she's in watches it
       if (down) {
+        const now = performance.now();
+        pointerHistory.push({ x: e.clientX, y: e.clientY, t: now });
+        while (pointerHistory.length > 0 && now - pointerHistory[0].t > 120) {
+          pointerHistory.shift();
+        }
+
         const dx = e.clientX - down.x, dy = e.clientY - down.y;
         if (!this.dragging && Math.hypot(dx, dy) > 5 && !this.busy) {
           this.dragging = true;
@@ -1604,6 +1829,21 @@ export class Capri {
             y: clamp(down.pos.y + dy, SPRITE.height * this.scale * 0.5, this.floor),
           };
           this.p.glitchSeed = Math.random() * 100;
+
+          // Drag dynamics: tilt opposite to drag movement (lagging momentum)
+          if (pointerHistory.length >= 2) {
+            const p0 = pointerHistory[0];
+            const p1 = pointerHistory[pointerHistory.length - 1];
+            const dt = (p1.t - p0.t) / 1000;
+            if (dt > 0.01) {
+              const dragVx = (p1.x - p0.x) / dt;
+              this.tilt = clamp(-dragVx * 0.02, -22, 22);
+              if (Math.abs(dragVx) > 100) {
+                this.faceToward(this.pos.x + dragVx);
+              }
+            }
+          }
+
           this.place();
         }
         return;
@@ -1618,15 +1858,65 @@ export class Capri {
       if (wasDragging) {
         tween(this.p, { glitch: 0, split: 0 }, 200, ease.out);
         this.onTeleport?.('end');
-        this.drop();
+
+        // Compute throw velocity from recent pointer history
+        let vx = 0;
+        let vy = 0;
+        const now = performance.now();
+        const recent = pointerHistory.filter((p) => now - p.t <= 100);
+        if (recent.length >= 2 && now - recent[recent.length - 1].t < 70) {
+          const p0 = recent[0];
+          const p1 = recent[recent.length - 1];
+          const dt = (p1.t - p0.t) / 1000;
+          if (dt > 0.012) {
+            vx = (p1.x - p0.x) / dt;
+            vy = (p1.y - p0.y) / dt;
+          }
+        }
+        pointerHistory = [];
+
+        // Apply throw physics
+        const rawSpeed = Math.hypot(vx, vy);
+        const maxSpeed = 3200;
+        if (rawSpeed > maxSpeed) {
+          vx = (vx / rawSpeed) * maxSpeed;
+          vy = (vy / rawSpeed) * maxSpeed;
+        } else {
+          vx *= 1.15;
+          vy *= 1.15;
+        }
+
+        this.drop(vx, vy);
       } else {
+        pointerHistory = [];
         this.onClick?.();
+      }
+    });
+
+    window.addEventListener('blur', () => {
+      if (down) {
+        const wasDragging = this.dragging;
+        down = null;
+        this.dragging = false;
+        pointerHistory = [];
+        if (wasDragging) {
+          tween(this.p, { glitch: 0, split: 0 }, 200, ease.out);
+          this.drop(0, 0);
+        }
       }
     });
   }
 
-  // Let go of her: onto a ledge if her hips are right at one, otherwise she falls.
-  drop() {
+  // Let go of her: onto a ledge if her hips are right at one, or flung with physics, or falls.
+  drop(vx = 0, vy = 0) {
+    const speed = Math.hypot(vx, vy);
+    const THROW_THRESHOLD = 180;
+
+    if (speed >= THROW_THRESHOLD) {
+      this.fling(vx, vy);
+      return;
+    }
+
     const s = this.scale;
     const hip = this.pos.y - (SPRITE.feet.y - SPRITE.hip) * s;
     for (const win of this.windows.wins) {
@@ -1634,13 +1924,14 @@ export class Capri {
       if (this.pos.x < win.x + 40 || this.pos.x > win.x + win.w - 40 || this.covered(win, this.pos.x)) continue;
       const dx = this.pos.x - win.x;
       this.pos = this.seat(win, dx);
-      this.setStance('sit', { perch: { id: win.id, dx } });
-      this.perform('plop');
-      this.voice.play('land');
+      this.settleLanded('sit', { id: win.id, dx });
       return;
     }
-    if (this.pos.y < this.floor - 2) this.fall();
-    else this.perform('land');
+    if (this.pos.y < this.floor - 4) {
+      this.fall({ vx: vx * 0.4, vy: vy * 0.4, flung: false });
+    } else {
+      this.settleLanded('stand', null);
+    }
   }
 
   // When the pointer comes close she turns around to face it and cocks her head;

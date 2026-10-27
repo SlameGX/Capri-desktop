@@ -56,4 +56,8 @@ contextBridge.exposeInMainWorld('host', {
   music: (query) => ipcRenderer.invoke('apps:music', query),
   openSite: (address) => ipcRenderer.invoke('apps:site', address),
   focusOverlay: (on) => ipcRenderer.send('overlay:focus', Boolean(on)),
+  observeDesktop: (options) => ipcRenderer.invoke('observer:observe', options),
+  getDesktopObservation: () => ipcRenderer.invoke('observer:latest'),
+  onDesktopObservation: on('observer:update'),
+  observerStatus: () => ipcRenderer.invoke('observer:status'),
 });

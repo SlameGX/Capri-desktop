@@ -24,8 +24,11 @@ const LOADING_AFTER_MS = 5000;
 const CLOSE_TAG = /\[\[\s*close\s*:?\s*([^\]]*)\]\]/i; // [[close: AM Music]] at the end of her answer
 // "close", "shut down", "ferme", "quitte", "cierra", "fecha", "закрой"... in any of her languages
 const CLOSE_ASK = /\b(close|shut|quit|kill|exit)|ferm|quitt|coupe|arr[êe]t|cierr|cerra|fech|закр|выключ/i;
-// her other tags: [[open: Spotify]], [[music: Bad Bunny]], [[media: next]], [[site: youtube.com]]
-const TAG = /\[\[\s*(open|music|media|site)\s*:\s*([^\]]*)\]\]/i;
+// her other tags: [[open: Spotify]], [[music: Bad Bunny]], [[media: next]], [[site: youtube.com]], [[inspect]]
+const TAG = /\[\[\s*(open|music|media|site|inspect)\s*:?\s*([^\]]*)\]\]/i;
+const SCREEN_INSPECT_ASK = /ekran|masa[uü]st[uü]|screen|desktop|pencere|window|fen[êe]tre|pantalla|tela|экран|youtube|video|sekme|sayfa|altba[sş]l[ıi]k|ba[sş]l[ıi]k|readme|dosya|kod|file|code|i[çc]erik/i;
+const INSPECT_VERB = /bak|g[öo]r|oku|incele|analiz|a[çc][ıi]kla|neler var|ne var|ne g[öo]r[üu]yorsun|hangi|neler a[çc][ıi]k|tamam|hepsi|b[üu]t[üu]n|full|all|oyun|uygulama|ba[sş]l[ıi]k|listele|ne yaz[ıi]yor|yaz[ıi]yor|yaz|s[öo]yle|tek tek|anlat|ver|look|see|check|read|inspect|what|show|view|explain|list|tell|regarde|mira|olha|посмотри/i;
+export const isInspectAsk = (text) => (SCREEN_INSPECT_ASK.test(text) && INSPECT_VERB.test(text)) || /ekran[ıi]ma bak|ne g[öo]r[üu]yorsun|ekran[ıi]n tamam[ıi]|tam ekran|masa[uü]st[uü]mde|look at (my )?screen|what's on (my )?screen|videolar[ıi]n|ba[sş]l[ıi]klar[ıi]|altba[sş]l[ıi]k|ne yaz[ıi]yor|readme|dosya(n[ıi]n)? i[çc]eri[ğg]i/i.test(text);
 // "open", "launch", "ouvre", "lance", "abre", "открой"... in any of her languages
 const OPEN_ASK = /\b(open|launch|start|run)\b|ouvr|lance|démarre|abre|abrir|inicia|ejecuta|executa|открой|запусти/i;
 // what to do with the music playing, said plainly (only when it's about music, or said in a few words)
@@ -86,6 +89,9 @@ export class Chat {
     this.greetedThisTurn = false;
     this.onSetup = null; // (status) => void: she can't answer yet (app.js hands it to setup.js)
     this.onBetterModel = null; // () => void: a bigger model than the tiny one she's on (setup.js)
+    this.lastObservation = null; // Windows UI Automation observation
+    this.inspector = null;
+    host.onDesktopObservation?.((obs) => { this.lastObservation = obs; });
     host.onChatDelta(({ id, text }) => this.onDelta(id, text));
   }
 
@@ -157,6 +163,7 @@ export class Chat {
         note: status.local ? t.note : t.noteCloud,
       },
       onSend: (text) => this.send(text),
+      onInspect: () => this.handleInspectClick(),
       onLeave: () => this.close(),
       hold: null,
     });
@@ -168,6 +175,12 @@ export class Chat {
     setTimeout(() => this.panel.chatInput.focus(), 150); // once the overlay has the keyboard
     capri.perform('hop');
     capri.nextMove = capri.nextGaze = performance.now() + STAY_MS;
+  }
+
+  handleInspectClick() {
+    const q = this.brain.lang === 'tr' ? 'Ekranıma bak, neler görüyorsun?' : 'Look at my screen, what do you see?';
+    this.panel.chatInput.value = q;
+    this.send(q);
   }
 
   close() {
@@ -198,7 +211,23 @@ export class Chat {
     const asked = this.agent ? null : this.asked(text);
     const early = asked && asked.kind !== 'close' ? this.doNow(asked) : null;
     await Promise.race([this.appsReady, new Promise((r) => setTimeout(r, 1500))]);
+
+    // Check if the user is asking about the desktop/screen or active window
+    const wantsInspect = isInspectAsk(text);
+    if (wantsInspect) {
+      this.capri.perform('curious', this.capri.towardCenter());
+      this.voice.play('blip');
+      const obs = await this.host.observeDesktop({ scope: 'auto', maxDepth: 28, maxElements: 1000, timeoutMs: 6500 }).catch(() => null);
+      if (obs) this.lastObservation = obs;
+    }
+
     const messages = [{ role: 'system', content: this.persona() }, ...this.history.slice(-REMEMBER)];
+    if (wantsInspect && this.lastObservation?.summary) {
+      messages.splice(messages.length - 1, 0, {
+        role: 'system',
+        content: `[Observation Facts from Windows UI Automation & Screen / Window Context]:\n${this.lastObservation.summary}\n(Instruction: Answer based on the real visible items, video titles, links, buttons, or apps listed above. Do not claim you cannot see them if they are present in the observation facts.)`,
+      });
+    }
     // nothing yet after a few seconds: Ollama is still loading the model (the first answer after a start),
     // or Claude Code is at work
     const wait = this.agent ? this.t.working : this.cold ? this.t.loading : null;
@@ -312,6 +341,10 @@ export class Chat {
     if (!tag) return undefined;
     const kind = tag[1].toLowerCase();
     const value = tag[2].trim();
+    if (kind === 'inspect') {
+      this.inspector?.open();
+      return undefined;
+    }
     if (!value || !wanted(kind, text)) return undefined;
     if (kind === 'media') return MEDIA_ACTIONS.has(value.toLowerCase()) ? this.media(value.toLowerCase(), answer) : undefined;
     if (kind === 'music') return this.music(value, answer);
@@ -449,7 +482,10 @@ export class Chat {
       const open = this.apps.map(({ name, label }) => (label && label !== name ? `${name} (${label})` : name)).join(', ');
       lines.push(`You can also close an app that's open, only when they ask you to: end your answer with [[close: NAME]], NAME being the exact name from this list (the part before the parentheses). They get a button to confirm it. Apps open right now: ${open}.`);
     }
-    lines.push('Apart from that, you can\'t see the user\'s screen or files, and you can\'t touch anything else on their PC (settings, files): if asked, say plainly that you can\'t, in character, and don\'t pretend to.');
+    lines.push('You have a read-only Windows Desktop Perception module powered by Windows UI Automation. When the user asks you to look at their screen, active window, visible text, buttons, or open applications, you receive structured observations of their active window (its title, process, buttons, inputs, tabs, and visible text). You can describe and analyze what is visible (you are strictly read-only: you cannot click, type, or interact). Always be honest: only describe observed controls and text, and note if anything is inaccessible or limited.');
+    if (this.lastObservation?.summary) {
+      lines.push(`Latest Active Window Observation:\n${this.lastObservation.summary}`);
+    }
     return lines;
   }
 
@@ -523,6 +559,7 @@ function namedSite(text) {
 
 // Whether your message asks for what her tag (its kind: open, music, media, site, close) would do.
 function wanted(kind, text) {
+  if (kind === 'inspect') return true;
   const music = MUSIC_WORD.test(text) || LISTEN.test(text);
   if (kind === 'music') return music;
   if (kind === 'media') return music || SOUND.test(text) || MEDIA_ASK.some(([, re]) => re.test(text));

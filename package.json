@@ -18,6 +18,8 @@
     "hooks:agy:uninstall": "node scripts/install-hooks-agy.js --uninstall",
     "check:llm": "node scripts/check-llm.js",
     "test:hooks": "node --test tests/hooks.test.js",
+    "test:observer": "node --test tests/observer.test.js",
+    "test": "node --test tests/*.test.js",
     "dist": "electron-builder --win"
   },
   "keywords": [
@@ -52,7 +54,8 @@
     ],
     "asarUnpack": [
       "hooks/**",
-      "src/main/windows.ps1"
+      "src/main/windows.ps1",
+      "src/main/observer/**"
     ],
     "win": {
       "target": "nsis",

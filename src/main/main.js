@@ -13,6 +13,7 @@ const config = require('./config');
 const { TRAY, LANGS } = require('./labels');
 const { createBridge } = require('./bridge');
 const { startWindowWatch } = require('./windows');
+const observer = require('./observer');
 const llm = require('./llm');
 const setup = require('./setup');
 const apps = require('./apps');
@@ -275,6 +276,7 @@ function rebuildTray() {
     { label: t.help, click: () => sendCommand('welcome') },
     ...(cfg.claude ? [{ label: t.report, click: () => sendCommand('report') }] : []),
     { label: t.talk, click: () => sendCommand('chat') },
+    { label: t.inspect, click: () => sendCommand('inspect') },
     { label: t.custom, click: () => sendCommand('customize') },
     { label: cfg.visible ? t.hide : t.show, accelerator: 'Ctrl+Alt+C', click: () => toggleVisible() },
     { type: 'separator' },
@@ -665,6 +667,24 @@ function registerIpc() {
       return [];
     }
   });
+  // Windows UI Automation Desktop Perception Engine (strictly read-only)
+  ipcMain.handle('observer:observe', async (_e, options) => {
+    try {
+      return await observer.observe(options || {});
+    } catch (err) {
+      return {
+        activeWindow: { title: 'Unknown', processName: 'Unknown', processId: 0 },
+        observationSource: 'windows-ui-automation',
+        observedAt: new Date().toISOString(),
+        elements: [],
+        limitations: [err.message],
+        summary: `Observation failed: ${err.message}`,
+        error: err.message,
+      };
+    }
+  });
+  ipcMain.handle('observer:latest', () => observer.getLatestObservation());
+  ipcMain.handle('observer:status', () => observer.getStatus());
 }
 
 // Only in --dev: lets scripts drive the overlay and grab frames of it (no desktop content, just our window).
@@ -784,6 +804,12 @@ function main() {
         overlay?.webContents.send('windows:update', data);
       },
     });
+    const handle = overlay.getNativeWindowHandle();
+    const selfHwnd = handle.length >= 8 ? handle.readBigUInt64LE(0) : BigInt(handle.readUInt32LE(0));
+    observer.startObserverHelper({ overlayHwnd: Number(selfHwnd) });
+    observer.onObservationUpdate((obs) => {
+      overlay?.webContents.send('observer:update', obs);
+    });
     createBridge({
       port: PORT,
       // her own Claude Code chat's hooks would cover its answer with theirs
@@ -805,6 +831,7 @@ function main() {
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
     windowWatch?.stop();
+    observer.stopObserverHelper();
   });
   app.on('window-all-closed', (e) => e.preventDefault());
 }

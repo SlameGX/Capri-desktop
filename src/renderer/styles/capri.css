@@ -737,6 +737,16 @@ html[data-motion='reduced'] .panel__bar {
   padding-inline: 10px;
 }
 
+.panel__inspect {
+  padding-inline: 8px;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+.panel__inspect:hover {
+  opacity: 1;
+}
+
 /* it's an AI, and it's not her voice from the show: said on every chat, plainly */
 .panel__note {
   margin: 9px 0 0;

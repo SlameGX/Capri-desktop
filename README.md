@@ -393,6 +393,8 @@ tools/build-sprite.py    rebuilds the sprite from the original cut-out (Python +
 tools/build-cutins.py    cuts the cut-ins and her faces out of frames of the show
 tools/build-intro.py     cuts her intro's close-ups out of their background, all the same way
 src/main/                Electron: full-screen transparent click-through window, tray, local HTTP bridge
+  observer.js            Desktop Context Engine: manages UIA observation lifecycle, normalization & summaries
+  observer/              Native C# helper (CapriObserver.cs / .exe) using Windows UI Automation
   windows.js / .ps1      where the other windows are (Windows only), so she can sit on them
   ollama.js              her chat: the local model, through Ollama
   apps.js                closing an app you asked her to close (after your click)
@@ -402,14 +404,31 @@ src/renderer/js/
   capri.js               the character: stances, teleport, sitting, peeking, falling, drag, sleep
   fx.js                  shards, light columns, bolts, glyphs, speed lines, shockwaves, the satellite and the red light, possessed windows, the cut-ins, her intro
   panel.js               the "transmission" panel, her faces, and the ticker
+  inspector.js           Desktop Inspector: live UIA tree view, control list, and honest limitation reporting
   guide.js               her guide: the tutorials, going to things and pointing at them
   brain.js               turns Claude events into lines and actions
   mission.js             today's mission log, for her report card
-  chat.js                talking to her: the conversation, who she is, her answers coming in
+  chat.js                talking to her: the conversation, who she is, desktop perception triggers & answers
   lines.js               what she says (FR / EN / ES / PT / RU)
   chip.js                her mask: while she sleeps, and bottom left when you put her away
   voice.js               the sounds
 ```
+
+## Windows Desktop Perception Engine (UI Automation)
+
+Capri features a native, read-only Windows Desktop Perception module built with C# and Windows UI Automation (UIA). Instead of relying on lossy, slow, or privacy-invasive screenshots as the primary source, Capri observes the operating-system accessibility tree of the active window:
+
+- **What it reads**: Active application process name, PID, window title, window bounds/state, visible text and document contents, buttons and clickables, input fields with values, tabs, lists, and focused elements.
+- **Strictly Read-Only**: Completely passive observation. Never simulates mouse clicks, keystrokes, scrolling, form submissions, or application control.
+- **Token-Efficient Semantic Summaries**: Compresses thousands of UIA nodes into a structured 200–500 token semantic summary for language models.
+- **AI Integration**: Ask Capri in chat in Turkish or English (e.g. *"ekranıma bak"*, *"ekranımda ne var"*, *"hangi butonlar var"*, *"look at my screen"*, *"what is open?"*) or click the Eye button (`👁️`) in the chat panel. Capri inspects the active window and truthfully describes what is visible in character.
+- **Desktop Inspector**: Right-click Capri › *"Inspect desktop"* (or *"Observer le bureau"* / *"Masaüstünü gözlemle"*) to open the live inspection panel showing discovered controls, extracted text, and accessibility limitations.
+- **Architecture**:
+  - `src/main/observer/CapriObserver.cs`: Native C# helper compiled with `.NET Framework` (`csc.exe`) referencing `UIAutomationClient.dll`.
+  - `src/main/observer.js`: Desktop Context Engine in Node.js (spawns helper, handles stdin/stdout IPC, data normalization, debouncing, and limitations).
+  - `src/renderer/js/inspector.js`: UI inspection panel with manual refresh (read-only).
+  - `tests/observer.test.js`: Test suite verifying compilation, schema conformity, token compression, and query intent matching.
+- **Running Tests**: `npm test` or `npm run test:observer`.
 
 To hack on it: `npm run dev` turns on debug routes on the bridge (`/debug/capture` saves a frame of the window to `captures/`,
 `/debug/testwin` opens test windows she can sit on, one per name, `/debug/mouse` moves and clicks a stand-in pointer

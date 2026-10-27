@@ -8,7 +8,7 @@ import { rand, pick } from './util.js';
 const BLIP_NOTES = [62, 65, 67, 69, 72, 74, 77, 79];
 const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
 
-export const CUES = ['teleport-out', 'teleport-in', 'done', 'alert', 'error', 'hello', 'blip', 'tick', 'star', 'land', 'rise', 'bolt', 'charge', 'possess'];
+export const CUES = ['teleport-out', 'teleport-in', 'done', 'alert', 'error', 'hello', 'blip', 'tick', 'star', 'land', 'rise', 'bolt', 'charge', 'possess', 'ouch'];
 
 export class Voice {
   constructor() {
@@ -88,6 +88,7 @@ export class Voice {
       bolt: () => this.bolt(opts.soft),
       charge: () => this.charge(),
       possess: () => this.possess(),
+      ouch: () => this.ouch(),
     }[cue];
     fn?.();
   }
@@ -259,5 +260,15 @@ export class Voice {
     o.frequency.exponentialRampToValueAtTime(55, t + 0.3);
     this.noiseBurst(t, 0.25, 0.15, 900, 200, 1.2);
     for (let i = 0; i < 5; i++) this.noiseBurst(t + 0.05 + i * 0.05, 0.02, 0.12, 4000, 4000, 10);
+  }
+
+  // startled yelp when hitting edges or hurt after a fling
+  ouch() {
+    const t = this.ctx.currentTime;
+    const o = this.osc('triangle', 920, t, 0.15, 0.14);
+    o.frequency.exponentialRampToValueAtTime(340, t + 0.13);
+    const o2 = this.osc('square', 460, t + 0.01, 0.11, 0.05);
+    o2.frequency.exponentialRampToValueAtTime(200, t + 0.11);
+    this.noiseBurst(t, 0.07, 0.07, 3200, 1100, 3);
   }
 }

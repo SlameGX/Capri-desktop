@@ -9,6 +9,7 @@ import { Mission } from './mission.js';
 import { Chat } from './chat.js';
 import { Setup } from './setup.js';
 import { Custom } from './custom.js';
+import { Inspector } from './inspector.js';
 import { linesFor } from './lines.js';
 import { pick, fmt, reducedMotion } from './util.js';
 
@@ -202,12 +203,26 @@ async function boot() {
   panel.onChar = (kind) => voice.play('blip', { mood: kind });
   panel.onTalk = (talking) => talking && capri.perform('talk');
   capri.onMenu = () => host.openMenu();
+  capri.onFlingHit = (hits) => {
+    const ouchText = Array(hits).fill('Ouch~').join(' ');
+    voice.play('ouch');
+    capri.hurt();
+    panel.say({
+      kind: 'alert',
+      face: 'wide',
+      badge: 'OUCH',
+      line: ouchText,
+      hold: 2400,
+    });
+  };
 
   // Her guide (guide.js): her welcome on first launch, and "How does it work?" in her menu,
   // where she takes you to things and points at them.
   const guide = new Guide({ capri, panel, voice, host, brain });
   // Talking to her (chat.js): "Talk to her" in her menu, or the button when you click her idle.
   const chat = new Chat({ capri, panel, voice, host, brain });
+  const inspector = new Inspector({ panel, host, capri, voice, brain });
+  chat.inspector = inspector;
   brain.onTalk = () => chat.start();
   // Getting her chat going with buttons (setup.js): Ollama and a model, a key, or an address
   const setup = new Setup({ guide, panel, host, brain, capri, voice });
@@ -361,6 +376,9 @@ async function boot() {
         break;
       case 'status':
         brain.status();
+        break;
+      case 'inspect': // "Inspect desktop" in her menu
+        inspector.open();
         break;
       case 'customize': // "Make her yours" in her menu
         custom.open();

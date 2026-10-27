@@ -64,6 +64,7 @@ export class Panel {
     this.chatInput = panel.querySelector('.panel__input');
     this.chatSend = panel.querySelector('.panel__send');
     this.chatClose = panel.querySelector('.panel__close');
+    this.chatInspect = panel.querySelector('.panel__inspect');
     this.note = panel.querySelector('.panel__note');
     this.chatForm.addEventListener('click', (e) => e.stopPropagation());
     this.chatForm.addEventListener('submit', (e) => {
@@ -77,6 +78,7 @@ export class Panel {
       if (e.key === 'Escape') this.hide();
     });
     this.chatClose.addEventListener('click', () => this.hide());
+    this.chatInspect?.addEventListener('click', () => this.current?.onInspect?.());
 
     this.el.addEventListener('click', () => {
       if (this.current?.chat) this.chatInput.focus(); // a chat stays until you close it
@@ -371,6 +373,7 @@ export class Panel {
   setChatBusy(busy) {
     this.chatInput.disabled = busy;
     this.chatSend.disabled = busy;
+    if (this.chatInspect) this.chatInspect.disabled = busy;
     if (!busy && this.current?.chat) this.chatInput.focus();
   }
 
