@@ -591,7 +591,15 @@ function registerIpc() {
     if (!llm.PROVIDERS[provider]) return { ok: false, error: 'unknown provider' };
     const before = config.load();
     const patch = { provider };
-    if (key) patch.apiKeys = { ...before.apiKeys, [provider]: setup.sealKey(String(key).trim()) };
+    if (key !== undefined) {
+      const trimmed = String(key || '').trim();
+      if (trimmed) {
+        patch.apiKeys = { ...before.apiKeys, [provider]: setup.sealKey(trimmed) };
+      } else if (before.apiKeys?.[provider]) {
+        const { [provider]: _, ...rest } = before.apiKeys;
+        patch.apiKeys = rest;
+      }
+    }
     if (url) patch.customUrl = String(url).trim();
     updateConfig(patch);
     const models = await refreshModels();

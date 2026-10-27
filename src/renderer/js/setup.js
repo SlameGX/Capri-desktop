@@ -242,8 +242,23 @@ export class Setup {
     });
     if (got?.action === 'other') return this.choose(null);
     if (!got?.text) return false;
+    const url = got.text.trim();
+
+    const keyGot = await this.guide.askText({
+      face: 'look',
+      line: t.customKey,
+      quote: t.customKeyHow,
+      placeholder: t.placeholder,
+      secret: true,
+      tag: t.keyTag,
+      note: t.customKeyNote,
+      actions: [{ id: 'skip', label: t.later }, { id: 'other', label: t.other }],
+    });
+    if (keyGot?.action === 'other') return this.choose(null);
+    const key = (keyGot?.text || '').trim();
+
     this.working(t.checking);
-    const res = await this.host.useProvider({ provider: 'custom', url: got.text });
+    const res = await this.host.useProvider({ provider: 'custom', url, key });
     return res.ok ? this.done() : this.address(res.error);
   }
 
