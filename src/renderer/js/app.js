@@ -31,11 +31,9 @@ const WATCH_MS = 2000; // how often she checks the pointer still reaches her
 const mine = (cfg) => ({ userName: cfg.userName || '', persona: cfg.persona || '', myLines: cfg.myLines || [], memories: cfg.memories || [] });
 
 async function boot() {
-  const [config, image, handshake1, handshake2, intro, ...cutins] = await Promise.all([
+  const [config, image, intro, ...cutins] = await Promise.all([
     host.getConfig(),
     loadImage('../../assets/capri/capri-full.png'),
-    loadImage('../../assets/capri/capri-handshake.png').catch(() => null),
-    loadImage('../../assets/capri/capri-handshake2.png').catch(() => null),
     // her intro: her close-up grabbing the screen, and its drawings with her mouth and arm moving
     Promise.all(GRAB_FRAMES.map((name) => loadImage(`../../assets/capri/intro-${name}.webp`).catch(() => null)))
       // decoded now, not the first time each one shows up (a hitch right on "hi", on the wave)
@@ -79,9 +77,7 @@ async function boot() {
   const capri = new Capri({
     root: document.getElementById('capri'),
     canvas: document.getElementById('sprite'),
-    handshakeCanvas: document.getElementById('handshake'),
     image,
-    handshakeImages: [handshake1, handshake2].filter(Boolean),
     fx,
     voice,
   });

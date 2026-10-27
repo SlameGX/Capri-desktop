@@ -84,6 +84,28 @@ export const ACTS = {
   // little nods while the words come out, two drawings on threes
   talk: { priority: 0, keys: rep(2, [[3, { head: 0.04, mane: 0.08 }], [3, { head: 0, mane: 0.03 }]]) },
 
+  // friendly wave at you
+  wave: {
+    priority: 3,
+    fps: 24,
+    directional: true,
+    keys: [
+      [2, { sy: 0.95, sx: 1.03, bob: 2, reach: 0.3, long: 1.05, head: -0.04, mane: 0.05 }],
+      [2, { sy: 1.04, sx: 0.98, bob: -2, reach: 0.8, long: 1.15, head: 0.08, mane: 0.12 }],
+      [3, { sy: 1.02, sx: 0.98, bob: -4, reach: 1.35, long: 1.25, head: 0.16, mane: 0.18, tilt: 2 }],
+      [3, { bob: -3, reach: 1.02, long: 1.18, head: 0.08, mane: 0.14, tilt: 1 }],
+      [3, { bob: -4, reach: 1.38, long: 1.24, head: 0.18, mane: 0.18, tilt: 2.5 }],
+      [3, { bob: -3, reach: 1.00, long: 1.18, head: 0.08, mane: 0.14, tilt: 1 }],
+      [3, { bob: -4, reach: 1.38, long: 1.24, head: 0.18, mane: 0.18, tilt: 2.5 }],
+      [3, { bob: -2, reach: 1.04, long: 1.16, head: 0.10, mane: 0.12, tilt: 1 }],
+      [3, { bob: -3, reach: 1.34, long: 1.22, head: 0.16, mane: 0.16, tilt: 2 }],
+      [3, { bob: -1, reach: 0.85, long: 1.12, head: 0.10, mane: 0.10, tilt: 1 }],
+      [3, { bob: 1, reach: 0.35, long: 1.04, head: 0.05, mane: 0.04, tilt: 0.5 }],
+      [2, { bob: 0, reach: 0.05, head: 0.02, mane: 0 }],
+      [1, {}],
+    ],
+  },
+
   // the cocked head: anticipation the other way, a smear, then a long hold
   curious: {
     priority: 1,
