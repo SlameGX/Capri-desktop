@@ -111,6 +111,12 @@ body {
   display: block;
 }
 
+.capri__handshake {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
 .fx {
   position: fixed;
   inset: 0;
@@ -205,6 +211,12 @@ body {
   height: 100%;
   object-fit: cover;
   clip-path: polygon(14% 4%, 96% 4%, 96% 79%, 82% 96%, 4% 96%, 4% 18%);
+}
+
+.panel__face img[src*='capri-handshake'] {
+  object-fit: cover;
+  object-position: 20% 12%;
+  background: var(--ink);
 }
 
 .panel.is-entering .panel__face img,

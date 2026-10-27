@@ -24,9 +24,17 @@ const INK = [0.08, 0.06, 0.11];
 const RED = [1, 0.13, 0.32];
 
 export class Capri {
-  constructor({ root, canvas, image, fx, voice }) {
+  constructor({ root, canvas, handshakeCanvas = null, image, handshakeImages = [], handshakeImage = null, fx, voice }) {
     this.root = root;
     this.canvas = canvas;
+    this.handshakeCanvas = handshakeCanvas;
+    this.handshakeImages = Array.isArray(handshakeImages) && handshakeImages.length
+      ? handshakeImages
+      : (handshakeImage ? [handshakeImage] : []);
+    this.handshakeCtx = handshakeCanvas ? handshakeCanvas.getContext('2d') : null;
+    this.handshaking = false;
+    this.handshakeStart = 0;
+    this.handshakeUntil = 0;
     this.sprite = new SpriteRenderer(canvas, image);
     this.fx = fx;
     this.voice = voice;
@@ -120,6 +128,14 @@ export class Capri {
   setScale(scale) {
     this.scale = scale;
     this.sprite.resize(scale);
+    if (this.handshakeCanvas) {
+      const dpr = window.devicePixelRatio || 1;
+      const { width, height } = SpriteRenderer.cssSize(scale);
+      this.handshakeCanvas.style.width = `${width}px`;
+      this.handshakeCanvas.style.height = `${height}px`;
+      this.handshakeCanvas.width = Math.round(width * dpr);
+      this.handshakeCanvas.height = Math.round(height * dpr);
+    }
     this.pivot();
     this.place();
   }
@@ -131,6 +147,7 @@ export class Capri {
     const fx = (SPRITE.pad + SPRITE.feet.x) * s;
     const fy = (SPRITE.pad + (this.stance === 'sit' ? SPRITE.hip : SPRITE.feet.y)) * s;
     this.canvas.style.transformOrigin = `${fx}px ${fy}px`;
+    if (this.handshakeCanvas) this.handshakeCanvas.style.transformOrigin = `${fx}px ${fy}px`;
   }
 
   setView(w, h, floor = h) {
@@ -153,6 +170,7 @@ export class Capri {
     const turn = (this.upside ? 180 : 0) + this.tilt;
     this.root.style.transform = `translate3d(${Math.round(left)}px, ${Math.round(top)}px, 0)`;
     this.canvas.style.transform = `rotate(${turn.toFixed(2)}deg) scale(${(this.facing * this.sx).toFixed(3)}, ${this.sy.toFixed(3)})`;
+    if (this.handshakeCanvas) this.handshakeCanvas.style.transform = this.canvas.style.transform;
     this.onMove?.(this.head());
   }
 
@@ -310,7 +328,7 @@ export class Capri {
   // ---------- frame loop ----------
 
   interval() {
-    if (this.busy || this.stance === 'fall' || this.act?.player.act.fps === 24) return ON_ONES;
+    if (this.busy || this.handshaking || this.stance === 'fall' || this.act?.player.act.fps === 24) return ON_ONES;
     return this.mode === 'sleep' ? ASLEEP : ON_TWOS;
   }
 
@@ -324,6 +342,11 @@ export class Capri {
 
   drawFrame(now = performance.now()) {
     this.lastDraw = now;
+    if (this.handshaking) {
+      this.drawHandshake(now);
+      this.place();
+      return;
+    }
     this.animate(now);
     this.sprite.draw(this.p);
     this.place();
@@ -471,6 +494,7 @@ export class Capri {
 
   // Play an act from acting.js. Resolves when it's over (or cut off by a stronger one).
   perform(name, dir = 0, { reach = 1 } = {}) {
+    if (this.handshaking) this.endHandshake();
     if (this.stowed || this.dormant) return Promise.resolve(); // nobody to act: she's in her biochip, or just her mask
     const act = ACTS[name];
     if (reducedMotion.matches && act.fps === 24) {
@@ -491,6 +515,95 @@ export class Capri {
     this.act = null;
     if (completed && current.player.act.flip) this.facing *= -1;
     current.done();
+  }
+
+  handshake() {
+    if (this.stowed) this.unstow();
+    if (this.dormant) this.rouse();
+    this.wake();
+    if (this.stance === 'peek') this.unpeek();
+    this.endAct(false);
+
+    if (!this.handshakeImages.length || !this.handshakeCanvas) {
+      this.perform('hop');
+      this.voice.play('hello');
+      return;
+    }
+
+    this.facing = this.towardCenter();
+    this.handshaking = true;
+    const now = performance.now();
+    this.handshakeStart = now;
+    this.handshakeUntil = now + 2400;
+
+    // Body remains still - no full body rocking/swaying
+    this.bob = 0;
+    this.tilt = 0;
+    this.sx = 1;
+    this.sy = 1;
+
+    this.canvas.hidden = true;
+    this.handshakeCanvas.hidden = false;
+
+    this.twitch();
+    this.voice.play('hello');
+  }
+
+  endHandshake() {
+    if (!this.handshaking) return;
+    this.handshaking = false;
+    if (this.handshakeCanvas) {
+      this.handshakeCanvas.hidden = true;
+      this.handshakeCtx?.clearRect(0, 0, this.handshakeCanvas.width, this.handshakeCanvas.height);
+    }
+    this.canvas.hidden = false;
+    this.bob = 0;
+    this.tilt = 0;
+    this.sx = 1;
+    this.sy = 1;
+    this.pulse();
+  }
+
+  drawHandshake(now) {
+    if (now >= this.handshakeUntil) {
+      this.endHandshake();
+      return;
+    }
+    const ctx = this.handshakeCtx;
+    const canvas = this.handshakeCanvas;
+    if (!ctx || !canvas || !this.handshakeImages.length) {
+      this.endHandshake();
+      return;
+    }
+
+    const elapsed = now - this.handshakeStart;
+
+    // Body stays still: no full body rocking or swaying
+    this.bob = 0;
+    this.tilt = 0;
+    this.sx = 1;
+    this.sy = 1;
+
+    // Rapid alternation between frame 1 and frame 2 (switching every 90ms)
+    const frameIndex = this.handshakeImages.length > 1
+      ? Math.floor(elapsed / 90) % this.handshakeImages.length
+      : 0;
+    const img = this.handshakeImages[frameIndex];
+    if (!img) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.scale(this.scale * dpr, this.scale * dpr);
+
+    const k = 419.0 / 354.0;
+    const dw = img.width * k;
+    const dh = img.height * k;
+    const dx = 17;
+    const dy = 53;
+
+    ctx.drawImage(img, dx, dy, dw, dh);
+    ctx.restore();
   }
 
   setStance(stance, { perch = null, peekSide = null, dir = 0 } = {}) {
@@ -1555,14 +1668,20 @@ export class Capri {
 
   bindPointer() {
     let down = null;
-    this.canvas.addEventListener('contextmenu', (e) => {
+    const onContextMenu = (e) => {
       e.preventDefault();
       if (this.hit(e.clientX, e.clientY)) this.onMenu?.(); // right-click: her menu
-    });
-    this.canvas.addEventListener('mousedown', (e) => {
+    };
+    const onMouseDown = (e) => {
       if (e.button !== 0 || this.busy || !this.hit(e.clientX, e.clientY)) return;
       down = { x: e.clientX, y: e.clientY, pos: { ...this.pos } };
-    });
+    };
+    this.canvas.addEventListener('contextmenu', onContextMenu);
+    this.canvas.addEventListener('mousedown', onMouseDown);
+    if (this.handshakeCanvas) {
+      this.handshakeCanvas.addEventListener('contextmenu', onContextMenu);
+      this.handshakeCanvas.addEventListener('mousedown', onMouseDown);
+    }
     window.addEventListener('mousemove', (e) => {
       this.mouse = { x: e.clientX, y: e.clientY }; // a window she's in watches it
       if (down) {

@@ -19,7 +19,7 @@ const PROVIDERS = {
     label: 'Pollinations (no key)', url: 'https://text.pollinations.ai/openai', modelsUrl: 'https://text.pollinations.ai/models',
   },
   openrouter: { label: 'OpenRouter', url: 'https://openrouter.ai/api/v1', env: 'OPENROUTER_API_KEY' },
-  openai: { label: 'OpenAI', url: 'https://api.openai.com/v1', env: 'OPENAI_API_KEY' },
+  openai: { label: 'OpenAI', url: 'http://127.0.0.1:8045/v1', env: 'OPENAI_API_KEY' },
   groq: { label: 'Groq', url: 'https://api.groq.com/openai/v1', env: 'GROQ_API_KEY' },
   gemini: { label: 'Google Gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai', env: 'GEMINI_API_KEY' },
   deepseek: { label: 'DeepSeek', url: 'https://api.deepseek.com/v1', env: 'DEEPSEEK_API_KEY' },
@@ -152,7 +152,7 @@ function claudeChat(cfg, text, persona, onDelta, signal) {
       windowsHide: true,
     });
     const kill = () => (process.platform === 'win32'
-      ? execFile('taskkill', ['/pid', String(child.pid), '/t', '/f'], () => {})
+      ? execFile('taskkill', ['/pid', String(child.pid), '/t', '/f'], () => { })
       : child.kill());
     signal.addEventListener('abort', kill, { once: true });
     let buffer = '';

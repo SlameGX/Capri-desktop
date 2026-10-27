@@ -70,7 +70,7 @@ function installOllama(onLine) {
 // Wakes Ollama up (its app, else `ollama serve` in the background) and waits for it to answer.
 async function startOllama() {
   const { app, cli } = ollamaFiles();
-  const run = (file, args) => spawn(file, args, { detached: true, stdio: 'ignore', windowsHide: true }).on('error', () => {}).unref();
+  const run = (file, args) => spawn(file, args, { detached: true, stdio: 'ignore', windowsHide: true }).on('error', () => { }).unref();
   if (fs.existsSync(app)) run(app, []);
   else run(fs.existsSync(cli) ? cli : 'ollama', ['serve']);
   for (let i = 0; i < 40; i++) {
@@ -125,7 +125,7 @@ function launchThroughOllama(integration) {
   const command = `""${fs.existsSync(cli) ? cli : 'ollama'}" launch ${integration}"`;
   spawn('cmd.exe', ['/d', '/c', 'start', '"Capri"', 'cmd.exe', '/k', command], {
     detached: true, stdio: 'ignore', windowsVerbatimArguments: true,
-  }).on('error', () => {}).unref();
+  }).on('error', () => { }).unref();
   return { ok: true };
 }
 

@@ -83,6 +83,7 @@ export class Chat {
     this.answer = '';
     this.apps = [];    // the apps open on this PC, as last listed: [{ name, label }]
     this.appsReady = Promise.resolve();
+    this.greetedThisTurn = false;
     this.onSetup = null; // (status) => void: she can't answer yet (app.js hands it to setup.js)
     this.onBetterModel = null; // () => void: a bigger model than the tiny one she's on (setup.js)
     host.onChatDelta(({ id, text }) => this.onDelta(id, text));
@@ -184,10 +185,13 @@ export class Chat {
     const id = Date.now();
     this.turn = id;
     this.answer = '';
+    const userGreeted = isGreeting(text);
+    this.greetedThisTurn = userGreeted;
+    if (userGreeted) this.capri.handshake();
     this.history.push({ role: 'user', content: text });
     this.panel.setChatBusy(true);
     this.panel.setActions([]); // a close button she offered before goes with a new message
-    this.panel.chatTurn({ quote: text, face: 'aside' });
+    this.panel.chatTurn({ quote: text, face: userGreeted ? 'handshake' : 'aside' });
     this.capri.pulse();
     // what you asked for plainly happens right away (the music, the volume, an app you named): her
     // line about it comes under her answer (Claude Code, answering her chat, does things its own way)
@@ -221,6 +225,10 @@ export class Chat {
     this.warm = true;
     this.remember({ role: 'assistant', content: answer });
     this.panel.stream(answer, { done: true });
+    if (!this.greetedThisTurn && isGreeting(answer)) {
+      this.greetedThisTurn = true;
+      this.capri.handshake();
+    }
     this.panel.setFace(mood(answer));
     this.panel.setChatBusy(false);
     if (!this.agent) this.after(res.text, answer, asked, early, text);
@@ -461,7 +469,13 @@ export class Chat {
   onDelta(id, piece) {
     if (id !== this.turn) return;
     this.answer += piece;
-    this.panel.stream(clean(this.answer));
+    const cleaned = clean(this.answer);
+    this.panel.stream(cleaned);
+    if (!this.greetedThisTurn && isGreeting(cleaned)) {
+      this.greetedThisTurn = true;
+      this.capri.handshake();
+      this.panel.setFace('handshake');
+    }
     this.voice.play('blip'); // her blips as the words come in
   }
 
@@ -527,8 +541,16 @@ function tagged(text) {
 
 const simple = (text) => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 
+// Greetings in Turkish, English, French, Spanish, Portuguese, Russian
+const GREETING = /(?:^|[\s,.!?:;~-])(?:selam(?:lar|[uü]n aleyk[uü]m|[ıi]n aleyk[uü]m|[uü]naleyk[uü]m)?|slm|merhaba(?:lar)?|mrb|g[üu]nayd[ıi]n|t[üu]nayd[ıi]n|naber|nas[ıi]ls[ıi]n|ne haber|hi|hello|hey|heya|howdy|yo|sup|greetings|bonjour|salut|coucou|bonsoir|hola|buenas|buenos d[íi]as|buenas tardes|ol[áa]|oi|bom dia|boa tarde|привет|здравствуй|здравствуйте)(?:[\s,.!?:;~-]|$)/iu;
+
+export function isGreeting(text) {
+  return GREETING.test(String(text || ''));
+}
+
 // Her face for an answer.
 function mood(text) {
+  if (isGreeting(text)) return 'handshake';
   if (/(ha){2,}|lol|mdr|jaja|kkk|хаха/i.test(text)) return 'laugh';
   if (text.includes('!')) return 'grin';
   if (text.trim().endsWith('?')) return 'smug';
