@@ -56,6 +56,11 @@ export class Capri {
     this.flung = false;
     this.edgeHits = 0;
     this.onFlingHit = null;
+    this.wallSide = null;
+    this.walkState = null;
+    this.climbState = null;
+    this.slideState = null;
+    this.wallHangUntil = 0;
 
     this.p = {
       seed: 0, boil: 0.9, hair: 0, head: 0, mane: 0, armL: 0, armR: 0, longL: 1, longR: 1, sit: 0, kickL: 0, kickR: 0,
@@ -136,7 +141,8 @@ export class Capri {
   pivot() {
     const s = this.scale;
     const fx = (SPRITE.pad + SPRITE.feet.x) * s;
-    const fy = (SPRITE.pad + (this.stance === 'sit' ? SPRITE.hip : SPRITE.feet.y)) * s;
+    const isHipStance = this.stance === 'sit' || this.stance === 'climb' || this.stance === 'wall_hang' || this.stance === 'wall_slide';
+    const fy = (SPRITE.pad + (isHipStance ? SPRITE.hip : SPRITE.feet.y)) * s;
     this.canvas.style.transformOrigin = `${fx}px ${fy}px`;
   }
 
@@ -326,7 +332,7 @@ export class Capri {
   // ---------- frame loop ----------
 
   interval() {
-    if (this.stance === 'fall') return 0;
+    if (this.stance === 'fall' || this.stance === 'walk' || this.stance === 'climb' || this.stance === 'wall_slide') return 0;
     if (this.busy || this.act?.player.act.fps === 24) return ON_ONES;
     return this.mode === 'sleep' ? ASLEEP : ON_TWOS;
   }
@@ -387,14 +393,19 @@ export class Capri {
     p.kickR = pose.kickR;
     p.smear = pose.smear;
     p.echo = pose.echo;
-    if (this.stance === 'fall' && (Math.abs(this.vx) > 50 || Math.abs(this.vy) > 100)) {
+    if (pose.sit !== undefined) {
+      p.sit = pose.sit;
+    } else if (this.stance !== 'sit') {
+      p.sit = 0;
+    }
+    if (!this.act && this.stance === 'fall' && (Math.abs(this.vx) > 50 || Math.abs(this.vy) > 100)) {
       p.smear = [-clamp(this.vx * 0.01, -14, 14), -clamp(this.vy * 0.012, -18, 18)];
       p.echo = [-clamp(this.vx * 0.005, -8, 8), -clamp(this.vy * 0.006, -10, 10)];
     }
     // on a ledge she stays seated: no lifting off it, no sinking through it
     const bob = this.stance === 'sit' ? clamp(pose.bob, -3, 2) : pose.bob;
     this.bob = this.dragging ? 0 : bob;
-    if (this.stance !== 'fall' && !this.dragging) {
+    if ((this.act || this.stance !== 'fall') && !this.dragging) {
       this.tilt = pose.tilt;
     }
     this.sx = pose.sx;
@@ -406,6 +417,22 @@ export class Capri {
   behave(now) {
     if (this.stance === 'fall') {
       this.updateFall(now);
+      return;
+    }
+    if (this.stance === 'walk') {
+      this.updateWalk(now);
+      return;
+    }
+    if (this.stance === 'climb') {
+      this.updateClimb(now);
+      return;
+    }
+    if (this.stance === 'wall_slide') {
+      this.updateWallSlide(now);
+      return;
+    }
+    if (this.stance === 'wall_hang') {
+      this.updateWallHang(now);
       return;
     }
     if (this.busy || this.dragging) return;
@@ -457,32 +484,109 @@ export class Capri {
     }
   }
 
-  // What she does with herself when nobody needs her.
+  // What she does with herself when nobody needs her: walking, climbing walls, perching, flourishing.
   wanderStep() {
-    if (!this.wander || this.stance === 'peek') {
-      if (this.stance !== 'peek') this.flourish();
+    if (!this.wander || this.stance === 'peek' || this.stance === 'walk' || this.stance === 'climb' || this.stance === 'wall_hang' || this.stance === 'wall_slide') {
+      if (this.stance !== 'peek' && this.stance !== 'walk' && this.stance !== 'climb' && this.stance !== 'wall_hang' && this.stance !== 'wall_slide') {
+        this.flourish();
+      }
       return;
     }
-    if (this.stance === 'sit' && this.perch?.id === 'taskbar') {
-      // nothing to hop off or take over down there: a flourish, or off for a bit (she comes back)
-      if (Math.random() < 0.6) this.flourish();
-      else this.teleport(this.spot('random'));
-      return;
-    }
-    if (this.stance === 'sit') {
+
+    const s = this.scale;
+    const minX = 40 * s + 15;
+    const maxX = this.view.w - (40 * s + 15);
+
+    // 1. If currently on a window ledge
+    if (this.stance === 'sit' && this.perch?.id !== 'taskbar') {
+      const win = this.perchWin(this.perch.id);
       const r = Math.random();
-      if (r < 0.3) this.flourish();
-      else if (r < 0.5 && this.canPossess()) this.possess();
-      else if (r < 0.75) this.fall(); // just hops off the ledge
-      else this.teleport(this.spot('random'));
-      return;
+      if (win && r < 0.40) {
+        // Walk along the window ledge!
+        this.walkLedge(win);
+        return;
+      } else if (r < 0.60 && this.canPossess()) {
+        this.possess();
+        return;
+      } else if (r < 0.80) {
+        this.fall(); // hops off ledge with gravity
+        return;
+      } else if (r < 0.90) {
+        this.flourish();
+        return;
+      } else {
+        this.teleport(this.spot('random'));
+        return;
+      }
     }
+
+    // 2. If sitting on taskbar ledge
+    if (this.stance === 'sit' && this.perch?.id === 'taskbar') {
+      const r = Math.random();
+      if (r < 0.45) {
+        // Stand up and walk across desktop
+        const targetX = rand(minX, maxX);
+        this.walkTo(targetX);
+        return;
+      } else if (r < 0.70) {
+        // Walk directly to a wall and climb!
+        const wallSide = Math.random() < 0.5 ? 'left' : 'right';
+        this.walkTo(wallSide === 'left' ? minX : maxX, { climbOnWall: true });
+        return;
+      } else if (r < 0.85) {
+        this.flourish();
+        return;
+      } else {
+        this.teleport(this.spot('random'));
+        return;
+      }
+    }
+
+    // 3. If standing on the floor or floating
+    const onGround = Math.abs(this.pos.y - this.floor) < 30;
     const seat = this.pickSeat();
     const r = Math.random();
-    if (seat && r < 0.35) this.sitOn(seat);
-    else if (r < 0.6) this.peek();
-    else if (r < 0.85) this.teleport(this.spot('random'));
-    else this.flourish();
+
+    if (onGround) {
+      if (r < 0.42) {
+        // Roam/walk across desktop floor
+        const targetX = rand(minX, maxX);
+        const willClimb = Math.random() < 0.40;
+        this.walkTo(willClimb ? (Math.random() < 0.5 ? minX : maxX) : targetX, { climbOnWall: willClimb });
+        return;
+      } else if (r < 0.68) {
+        // Walk directly to closest wall and climb up!
+        const wallSide = this.pos.x < this.view.w / 2 ? 'left' : 'right';
+        this.walkTo(wallSide === 'left' ? minX : maxX, { climbOnWall: true });
+        return;
+      } else if (seat && r < 0.84) {
+        this.sitOn(seat);
+        return;
+      } else if (r < 0.92) {
+        this.peek();
+        return;
+      } else {
+        this.flourish();
+        return;
+      }
+    } else {
+      // Floating higher up
+      if (seat && r < 0.35) {
+        this.sitOn(seat);
+        return;
+      } else if (r < 0.60) {
+        // Climb nearby wall
+        const wallSide = this.pos.x < this.view.w / 2 ? 'left' : 'right';
+        this.startClimb(wallSide);
+        return;
+      } else if (r < 0.80) {
+        this.fall();
+        return;
+      } else {
+        this.flourish();
+        return;
+      }
+    }
   }
 
   flourish() {
@@ -533,10 +637,11 @@ export class Capri {
     return this.wave();
   }
 
-  setStance(stance, { perch = null, peekSide = null, dir = 0 } = {}) {
+  setStance(stance, { perch = null, peekSide = null, wallSide = null, dir = 0 } = {}) {
     this.stance = stance;
     this.perch = perch;
     this.peekSide = peekSide;
+    this.wallSide = wallSide;
     this.p.sit = stance === 'sit' ? 1 : 0;
     this.base = this.restBase(dir);
     this.pivot();
@@ -553,6 +658,10 @@ export class Capri {
     if (this.stance === 'sit') return 'sit';
     if (this.stance === 'peek') return 'peek';
     if (this.stance === 'fall') return 'fall';
+    if (this.stance === 'walk') return 'walk';
+    if (this.stance === 'climb') return 'climb';
+    if (this.stance === 'wall_hang') return 'wall_hang';
+    if (this.stance === 'wall_slide') return 'wall_slide';
     return this.mode === 'sleep' ? 'sleep' : 'stand';
   }
 
@@ -581,6 +690,8 @@ export class Capri {
 
   // Somewhere to be while Claude works: on the window in front if she can sit on it, else her corner.
   goToWork() {
+    this.stopWalking();
+    this.stopClimbing();
     this.setMode('work');
     const seat = this.pickSeat({ frontOnly: true });
     if (seat) {
@@ -599,6 +710,8 @@ export class Capri {
   // Claude did something: come out of hiding.
   attend() {
     this.wake();
+    this.stopWalking();
+    this.stopClimbing();
     if (this.stance === 'peek' && !this.busy) this.teleport(this.spot('post'));
   }
 
@@ -887,6 +1000,33 @@ export class Capri {
       case 'snap':
         this.twitch();
         this.voice.play('tick');
+        break;
+      case 'step':
+        this.voice.play('tick', { soft: true });
+        this.fx.burst(this.pos.x, this.pos.y - 2, { count: 3, power: 0.18, spread: 8 * s });
+        break;
+      case 'grip': {
+        this.voice.play('tick', { soft: true });
+        const wallX = this.wallSide === 'left' ? this.pos.x - 8 * s : this.pos.x + 8 * s;
+        this.fx.burst(wallX, this.pos.y - 110 * s, { count: 3, power: 0.25, spread: 12 * s });
+        break;
+      }
+      case 'slide_spark': {
+        this.voice.play('tick', { soft: true });
+        const sparkX = this.wallSide === 'left' ? this.pos.x - 8 * s : this.pos.x + 8 * s;
+        this.fx.burst(sparkX, this.pos.y - 80 * s, { count: 4, power: 0.35, spread: 16 * s });
+        break;
+      }
+      case 'trip_slip':
+        this.voice.play('blip', { mood: 'alert' });
+        this.fx.burst(this.pos.x, this.pos.y - 4, { count: 6, power: 0.35, spread: 22 * s });
+        break;
+      case 'trip_impact':
+        this.voice.play('tick');
+        this.fx.burst(this.pos.x, this.pos.y - 4, { count: 12, power: 0.55, spread: 35 * s });
+        this.p.glitch = 0.22;
+        setTimeout(() => { this.p.glitch = 0; }, 90);
+        this.onTripFall?.();
         break;
       default:
         if (this.sky) this.skyCue(cue);
@@ -1449,12 +1589,14 @@ export class Capri {
     this.vx *= Math.pow(0.985, dt * 60);
 
     // 3. Rotation & tilt dynamics
-    if (Math.abs(this.vRot) > 5) {
-      this.tilt += this.vRot * dt;
-      this.vRot *= Math.pow(0.90, dt * 60);
-    } else {
-      const targetTilt = clamp(this.vx * 0.04, -30, 30);
-      this.tilt = lerp(this.tilt, targetTilt, 0.18);
+    if (!this.act) {
+      if (Math.abs(this.vRot) > 5) {
+        this.tilt += this.vRot * dt;
+        this.vRot *= Math.pow(0.90, dt * 60);
+      } else {
+        const targetTilt = clamp(this.vx * 0.04, -30, 30);
+        this.tilt = lerp(this.tilt, targetTilt, 0.18);
+      }
     }
 
     // Facing direction matches travel if moving horizontally
@@ -1472,9 +1614,20 @@ export class Capri {
     const minY = SPRITE.feet.y * s + 10;
     const maxY = this.floor;
 
-    // 4. Side walls collision & bounce
+    // 4. Side walls collision & bounce (or grab wall with claws!)
     if (nextX <= minX && this.vx < 0) {
       nextX = minX;
+      if (Math.abs(this.vx) < 650 && this.vy > -120 && Math.random() < 0.35) {
+        this.vx = 0;
+        this.vy = 0;
+        this.vRot = 0;
+        this.tilt = 0;
+        this.flung = false;
+        this.bounces = 0;
+        this.pos = { x: minX, y: nextY };
+        this.hangOnWall('left');
+        return;
+      }
       this.vx = -this.vx * 0.58;
       if (this.flung) {
         this.edgeHits = (this.edgeHits || 0) + 1;
@@ -1490,6 +1643,17 @@ export class Capri {
       }
     } else if (nextX >= maxX && this.vx > 0) {
       nextX = maxX;
+      if (Math.abs(this.vx) < 650 && this.vy > -120 && Math.random() < 0.35) {
+        this.vx = 0;
+        this.vy = 0;
+        this.vRot = 0;
+        this.tilt = 0;
+        this.flung = false;
+        this.bounces = 0;
+        this.pos = { x: maxX, y: nextY };
+        this.hangOnWall('right');
+        return;
+      }
       this.vx = -this.vx * 0.58;
       if (this.flung) {
         this.edgeHits = (this.edgeHits || 0) + 1;
@@ -1772,6 +1936,411 @@ export class Capri {
     this.root.hidden = hidden;
   }
 
+  // ---------- walking & climbing ----------
+
+  stopWalking() {
+    if (this.walkState) {
+      const cb = this.walkState.onDone;
+      this.walkState = null;
+      cb?.();
+    }
+  }
+
+  stopClimbing() {
+    if (this.climbState) {
+      const cb = this.climbState.onDone;
+      this.climbState = null;
+      cb?.();
+    }
+    this.slideState = null;
+    this.wallHangUntil = 0;
+  }
+
+  walk(targetX, opts) {
+    return this.walkTo(targetX, opts);
+  }
+
+  climb(wallSide, opts) {
+    return this.startClimb(wallSide, opts);
+  }
+
+  walkTo(targetX, { win = null, speed = 125, climbOnWall = false, onDone = null, forceTrip = false, allowTrip = true } = {}) {
+    if (this.busy || this.hidden || this.dormant || this.stowed) return false;
+    if (this.stance === 'fall' || this.stance === 'peek') return false;
+
+    this.stopClimbing();
+    const s = this.scale;
+    const minX = 40 * s + 15;
+    const maxX = this.view.w - (40 * s + 15);
+    const clampedTargetX = clamp(Number(targetX) || this.pos.x, minX, maxX);
+
+    if (Math.abs(clampedTargetX - this.pos.x) < 8) {
+      if (climbOnWall && (this.pos.x <= minX + 15 || this.pos.x >= maxX - 15)) {
+        this.startClimb(this.pos.x <= minX + 15 ? 'left' : 'right', { onDone });
+        return true;
+      }
+      onDone?.();
+      return true;
+    }
+
+    if (reducedMotion.matches) {
+      this.pos.x = clampedTargetX;
+      if (win) this.settleLanded('sit', { id: win.id, dx: clamp(clampedTargetX - win.x, 40, win.w - 40) });
+      else this.settleLanded('stand', null);
+      onDone?.();
+      return true;
+    }
+
+    const dir = clampedTargetX < this.pos.x ? -1 : 1;
+    this.faceToward(clampedTargetX);
+    this.setStance('walk', { perch: win ? { id: win.id, dx: this.pos.x - win.x } : null, dir });
+
+    const totalDist = Math.abs(clampedTargetX - this.pos.x);
+    let tripDist = null;
+    if (forceTrip) {
+      tripDist = Math.max(25, Math.min(100, totalDist * 0.45));
+    } else if (allowTrip && !win && totalDist > 160 && Math.random() < 0.08) {
+      // Rare slip & fall during longer walks on the floor (~8% chance)
+      tripDist = totalDist * rand(0.35, 0.65);
+    }
+
+    this.walkState = {
+      targetX: clampedTargetX,
+      speed,
+      win,
+      climbOnWall,
+      onDone,
+      dir,
+      tripDist,
+      traveledDist: 0,
+      lastTime: performance.now(),
+    };
+    return true;
+  }
+
+  async trip({ dir = null } = {}) {
+    if (this.busy) return;
+    this.stopClimbing();
+    this.stopWalking();
+    this.busy = true;
+
+    const tripDir = dir ?? (this.facing < 0 ? 1 : -1);
+    await this.perform('trip', tripDir);
+    this.busy = false;
+    this.settleLanded('stand', null);
+  }
+
+  walkLedge(win, { dx = null, onDone = null } = {}) {
+    if (!win || !this.canSit(win)) return false;
+    const minDx = 45;
+    const maxDx = Math.max(minDx, win.w - 45);
+    const curDx = this.perch?.id === win.id ? this.perch.dx : (this.pos.x - win.x);
+    const targetDx = dx ?? (curDx > win.w * 0.5 ? rand(minDx, win.w * 0.35) : rand(win.w * 0.65, maxDx));
+    const targetX = win.x + clamp(targetDx, minDx, maxDx);
+    return this.walkTo(targetX, { win, onDone });
+  }
+
+  updateWalk(now) {
+    if (!this.walkState) {
+      this.setStance('stand');
+      return;
+    }
+    const dt = Math.min(0.04, (now - this.walkState.lastTime) / 1000);
+    this.walkState.lastTime = now;
+    if (dt <= 0) return;
+
+    const s = this.scale;
+    const minX = 40 * s + 15;
+    const maxX = this.view.w - (40 * s + 15);
+    const { targetX, speed, win, climbOnWall, onDone } = this.walkState;
+
+    if (win) {
+      const liveWin = this.perchWin(win.id);
+      if (!liveWin || !this.canSit(liveWin) || this.covered(liveWin, this.pos.x)) {
+        this.walkState = null;
+        this.fall();
+        return;
+      }
+      this.pos.y = this.seat(liveWin, this.pos.x - liveWin.x).y;
+    } else {
+      this.pos.y = this.floor;
+    }
+
+    const stepDist = speed * dt;
+    const dist = targetX - this.pos.x;
+
+    this.walkState.traveledDist = (this.walkState.traveledDist || 0) + stepDist;
+    if (this.walkState.tripDist && this.walkState.traveledDist >= this.walkState.tripDist) {
+      const walkDir = this.walkState.dir;
+      this.walkState = null;
+      this.trip({ dir: walkDir });
+      return;
+    }
+
+    if (Math.abs(dist) <= stepDist) {
+      this.pos.x = targetX;
+      const doneCb = onDone;
+      const shouldClimb = climbOnWall && (targetX <= minX + 15 || targetX >= maxX - 15);
+      this.walkState = null;
+
+      if (shouldClimb) {
+        this.startClimb(targetX <= minX + 15 ? 'left' : 'right', { onDone: doneCb });
+        return;
+      }
+
+      if (win) {
+        const dx = clamp(this.pos.x - win.x, 40, win.w - 40);
+        this.settleLanded('sit', { id: win.id, dx });
+      } else {
+        this.settleLanded('stand', null);
+      }
+      doneCb?.();
+      return;
+    }
+
+    this.pos.x += Math.sign(dist) * stepDist;
+
+    if (!win) {
+      if (this.pos.x <= minX && dist < 0) {
+        this.pos.x = minX;
+        const doneCb = onDone;
+        this.walkState = null;
+        if (climbOnWall) {
+          this.startClimb('left', { onDone: doneCb });
+        } else {
+          this.settleLanded('stand', null);
+          doneCb?.();
+        }
+        return;
+      } else if (this.pos.x >= maxX && dist > 0) {
+        this.pos.x = maxX;
+        const doneCb = onDone;
+        this.walkState = null;
+        if (climbOnWall) {
+          this.startClimb('right', { onDone: doneCb });
+        } else {
+          this.settleLanded('stand', null);
+          doneCb?.();
+        }
+        return;
+      }
+    } else {
+      const minWinX = win.x + 35;
+      const maxWinX = win.x + win.w - 35;
+      if (this.pos.x <= minWinX && dist < 0) {
+        this.pos.x = minWinX;
+        this.walkState = null;
+        this.settleLanded('sit', { id: win.id, dx: 35 });
+        onDone?.();
+        return;
+      } else if (this.pos.x >= maxWinX && dist > 0) {
+        this.pos.x = maxWinX;
+        this.walkState = null;
+        this.settleLanded('sit', { id: win.id, dx: win.w - 35 });
+        onDone?.();
+        return;
+      }
+    }
+
+    this.place();
+  }
+
+  startClimb(wallSide = 'left', { targetY = null, speed = 90, onDone = null } = {}) {
+    if (this.busy || this.hidden || this.dormant || this.stowed) return false;
+    this.stopWalking();
+    const s = this.scale;
+    const minX = 40 * s + 15;
+    const maxX = this.view.w - (40 * s + 15);
+    const side = (wallSide === 'right' || wallSide === 1) ? 'right' : 'left';
+    const wallX = side === 'left' ? minX : maxX;
+
+    this.pos.x = wallX;
+    this.facing = side === 'left' ? 1 : -1;
+
+    const destY = targetY ?? rand(this.view.h * 0.22, this.view.h * 0.55);
+
+    if (reducedMotion.matches) {
+      this.pos.y = destY;
+      this.hangOnWall(side);
+      onDone?.();
+      return true;
+    }
+
+    this.setStance('climb', { wallSide: side, dir: side === 'left' ? -1 : 1 });
+    this.climbState = {
+      wallSide: side,
+      targetY: destY,
+      speed,
+      onDone,
+      lastTime: performance.now(),
+    };
+    this.voice.play('tick');
+    this.fx.burst(wallX, this.pos.y - 60 * s, { count: 5, power: 0.3, spread: 20 * s });
+    return true;
+  }
+
+  updateClimb(now) {
+    if (!this.climbState) {
+      this.setStance('stand');
+      return;
+    }
+    const dt = Math.min(0.04, (now - this.climbState.lastTime) / 1000);
+    this.climbState.lastTime = now;
+    if (dt <= 0) return;
+
+    const s = this.scale;
+    const { wallSide, targetY, speed, onDone } = this.climbState;
+    const minX = 40 * s + 15;
+    const maxX = this.view.w - (40 * s + 15);
+    this.pos.x = wallSide === 'left' ? minX : maxX;
+
+    const minY = SPRITE.feet.y * s + 30;
+    const effectiveTargetY = Math.max(targetY, minY);
+    const stepDist = speed * dt;
+
+    if (this.pos.y - stepDist <= effectiveTargetY) {
+      this.pos.y = effectiveTargetY;
+      const doneCb = onDone;
+      this.climbState = null;
+      this.hangOnWall(wallSide);
+      doneCb?.();
+      return;
+    }
+
+    this.pos.y -= stepDist;
+    this.place();
+  }
+
+  hangOnWall(wallSide, durationMs = rand(3500, 7500)) {
+    this.stopWalking();
+    this.stopClimbing();
+    this.endAct(false);
+    const s = this.scale;
+    const minX = 40 * s + 15;
+    const maxX = this.view.w - (40 * s + 15);
+    const side = (wallSide === 'right' || wallSide === 1) ? 'right' : 'left';
+    this.pos.x = side === 'left' ? minX : maxX;
+    this.facing = side === 'left' ? 1 : -1;
+    this.setStance('wall_hang', { wallSide: side, dir: side === 'left' ? -1 : 1 });
+    this.wallHangUntil = performance.now() + durationMs;
+    this.voice.play('tick');
+    this.fx.burst(this.pos.x, this.pos.y - 80 * s, { count: 4, power: 0.25, spread: 15 * s });
+  }
+
+  updateWallHang(now) {
+    if (now > this.wallHangUntil) {
+      this.wallHangUntil = Infinity;
+      this.wallHangAction();
+    }
+  }
+
+  wallHangAction() {
+    if (this.busy || this.stance !== 'wall_hang') return;
+    const side = this.wallSide || (this.pos.x < this.view.w / 2 ? 'left' : 'right');
+    const r = Math.random();
+
+    if (r < 0.55) {
+      // Wall leap into desktop!
+      this.wallLeap();
+    } else if (r < 0.75 && this.pos.y < this.view.h * 0.35) {
+      // Near top of screen: peek in from the edge/top!
+      this.peek(pick([side, 'top']));
+    } else {
+      // Slide down wall with sparks!
+      this.wallSlide();
+    }
+  }
+
+  async wallLeap(style = null) {
+    if (this.busy) return;
+    const side = this.wallSide || (this.pos.x < this.view.w / 2 ? 'left' : 'right');
+    const outDir = side === 'left' ? 1 : -1;
+    this.stopClimbing();
+    this.stopWalking();
+    this.wallHangUntil = Infinity;
+    this.busy = true;
+
+    const styles = ['standard', 'flip', 'spin', 'dive'];
+    const selectedStyle = style && styles.includes(style) ? style : (style === 'random' || !style ? pick(styles) : 'standard');
+
+    let actName = 'wall_leap';
+    let vx = outDir * rand(340, 520);
+    let vy = rand(-380, -220);
+
+    if (selectedStyle === 'flip') {
+      actName = 'wall_leap_flip';
+      vx = outDir * rand(380, 560);
+      vy = rand(-460, -320);
+    } else if (selectedStyle === 'spin') {
+      actName = 'wall_leap_spin';
+      vx = outDir * rand(440, 620);
+      vy = rand(-360, -220);
+    } else if (selectedStyle === 'dive') {
+      actName = 'wall_leap_dive';
+      vx = outDir * rand(520, 750);
+      vy = rand(-260, -150);
+    }
+
+    // 1. Play the leap act (starts with anticipation coil against the wall)
+    this.facing = side === 'left' ? 1 : -1;
+    const actPromise = this.perform(actName, outDir);
+
+    // 2. Wait for coil anticipation before launching (3 frames @ 24fps = 125ms)
+    const coilMs = reducedMotion.matches ? 0 : (1000 / 24) * 3;
+    if (coilMs > 0) {
+      await sleep(coilMs);
+    }
+
+    this.busy = false;
+
+    // 3. Explode off the wall into physics flight while animation continues playing
+    this.fling(vx, vy);
+    this.vRot = 0; // rotation is handled cleanly by the act's frames
+    this.facing = outDir === 1 ? -1 : 1;
+
+    return actPromise;
+  }
+
+  wallSlide() {
+    if (this.busy) return;
+    const side = this.wallSide || (this.pos.x < this.view.w / 2 ? 'left' : 'right');
+    this.stopClimbing();
+    this.setStance('wall_slide', { wallSide: side, dir: side === 'left' ? -1 : 1 });
+    this.slideState = {
+      wallSide: side,
+      speed: 280,
+      lastTime: performance.now(),
+    };
+  }
+
+  updateWallSlide(now) {
+    if (!this.slideState) {
+      this.setStance('stand');
+      return;
+    }
+    const dt = Math.min(0.04, (now - this.slideState.lastTime) / 1000);
+    this.slideState.lastTime = now;
+    if (dt <= 0) return;
+
+    const s = this.scale;
+    const { wallSide, speed } = this.slideState;
+    const minX = 40 * s + 15;
+    const maxX = this.view.w - (40 * s + 15);
+    this.pos.x = wallSide === 'left' ? minX : maxX;
+
+    this.pos.y += speed * dt;
+
+    const landing = this.landing();
+    if (this.pos.y >= landing.y) {
+      this.pos.y = landing.y;
+      this.slideState = null;
+      this.settleLanded(landing.stance, landing.perch);
+      return;
+    }
+
+    this.place();
+  }
+
   // ---------- pointer ----------
 
   bindPointer() {
@@ -1784,7 +2353,7 @@ export class Capri {
     const onMouseDown = (e) => {
       if (e.button !== 0 || this.busy || !this.hit(e.clientX, e.clientY)) return;
       if (this.mode === 'sleep') this.wake();
-      if (this.stance === 'fall') {
+      if (this.stance === 'fall' || this.stance === 'walk' || this.stance === 'climb' || this.stance === 'wall_hang' || this.stance === 'wall_slide') {
         this.vx = 0;
         this.vy = 0;
         this.vRot = 0;
@@ -1794,6 +2363,9 @@ export class Capri {
         this.edgeHits = 0;
         this.p.smear = [0, 0];
         this.p.echo = [0, 0];
+        this.stopWalking();
+        this.stopClimbing();
+        this.endAct(false);
         this.setStance('stand');
       }
       down = { x: e.clientX, y: e.clientY, pos: { ...this.pos } };

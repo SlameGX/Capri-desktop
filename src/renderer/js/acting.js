@@ -67,6 +67,72 @@ export const ACTS = {
     ],
   },
 
+  // walking across the floor or window ledges: rhythmic cel-animated walk cycle
+  walk: {
+    loop: true,
+    fps: 24,
+    directional: true,
+    keys: [
+      // 1. Right Contact: right foot forward, left foot back. Lean slightly forward.
+      [2, { kickL: -0.22, kickR: 0.28, armL: -0.28, armR: 0.32, bob: 0, tilt: 3.5, sy: 0.98, sx: 1.01, hair: -1.5, head: 0.04 }, 'step'],
+      // 2. Right Down / Weight absorb: front foot plants, body sinks.
+      [3, { kickL: -0.15, kickR: 0.12, armL: -0.2, armR: 0.22, bob: 3, tilt: 4, sy: 0.93, sx: 1.04, hair: -2.5, head: 0.06 }],
+      // 3. Passing: back (left) foot swings through knee bent, body rises.
+      [3, { kickL: 0.35, kickR: 0.02, armL: 0.08, armR: -0.05, bob: -5, tilt: 2.5, sy: 1.05, sx: 0.97, hair: 0.5, head: 0.02 }],
+      // 4. Fall forward: left foot extends for landing.
+      [2, { kickL: 0.28, kickR: -0.12, armL: 0.25, armR: -0.2, bob: -2, tilt: 3, sy: 1.01, sx: 0.99, hair: 1.5, head: 0.03 }],
+      // 5. Left Contact: left foot forward, right foot back.
+      [2, { kickL: 0.28, kickR: -0.22, armL: 0.32, armR: -0.28, bob: 0, tilt: 3.5, sy: 0.98, sx: 1.01, hair: 1.5, head: 0.04 }, 'step'],
+      // 6. Left Down / Weight absorb: left foot plants, body sinks.
+      [3, { kickL: 0.12, kickR: -0.15, armL: 0.22, armR: -0.2, bob: 3, tilt: 4, sy: 0.93, sx: 1.04, hair: 2.5, head: 0.06 }],
+      // 7. Passing: right foot swings through knee bent, body rises.
+      [3, { kickL: 0.02, kickR: 0.35, armL: -0.05, armR: 0.08, bob: -5, tilt: 2.5, sy: 1.05, sx: 0.97, hair: -0.5, head: 0.02 }],
+      // 8. Fall forward: right foot extends for contact 1.
+      [2, { kickL: -0.12, kickR: 0.28, armL: -0.2, armR: 0.25, bob: -2, tilt: 3, sy: 1.01, sx: 0.99, hair: -1.5, head: 0.03 }],
+    ],
+  },
+
+  // climbing up a wall / screen edge: alternating arm grabs, claws digging in, scrambling legs
+  climb: {
+    loop: true,
+    fps: 24,
+    directional: true,
+    keys: [
+      // 1. Hand 1 grips high: upper arm reaches, claw digs into wall; lower arm braces.
+      [2, { armL: 0.88, longL: 1.28, armR: 0.2, longR: 1.0, kickL: -0.18, kickR: 0.35, sit: 0.2, bob: -2, tilt: 5, head: 0.12, mane: 0.1 }, 'grip'],
+      // 2. Pull up 1: arm pulls body up, legs push.
+      [3, { armL: 0.55, longL: 1.15, armR: 0.05, longR: 0.95, kickL: -0.05, kickR: 0.18, sit: 0.12, bob: -8, tilt: 6.5, sy: 1.06, sx: 0.95, head: 0.08 }],
+      // 3. Hand 2 reaches: other arm reaches high up past first arm.
+      [2, { armL: 0.2, longL: 1.0, armR: 0.92, longR: 1.32, kickL: 0.35, kickR: -0.18, sit: 0.2, bob: -4, tilt: 5.5, head: 0.1, mane: 0.1 }, 'grip'],
+      // 4. Pull up 2: second arm pulls body up.
+      [3, { armL: 0.05, longL: 0.95, armR: 0.58, longR: 1.15, kickL: 0.18, kickR: -0.05, sit: 0.12, bob: -9, tilt: 6.5, sy: 1.06, sx: 0.95, head: 0.08 }],
+    ],
+  },
+
+  // perched / clinging to the wall, resting with one claw anchored like a cyber-cat
+  wall_hang: {
+    loop: true,
+    fps: 12,
+    directional: true,
+    keys: [
+      [12, { armL: 0.78, longL: 1.2, armR: -0.12, kickL: 0.24, kickR: 0.08, sit: 0.18, tilt: 6, head: -0.08, hair: -1.5, mane: -0.04 }],
+      [2, { armL: 0.80, longL: 1.22, armR: -0.10, kickL: 0.26, kickR: 0.06, sit: 0.19, tilt: 6.5, head: -0.04, hair: -0.5 }],
+      [10, { armL: 0.78, longL: 1.2, armR: -0.14, kickL: 0.22, kickR: 0.08, sit: 0.18, tilt: 6, head: -0.12, hair: -2.0, mane: 0.02 }],
+      [2, { armL: 0.76, longL: 1.18, armR: -0.12, kickL: 0.24, kickR: 0.08, sit: 0.18, tilt: 5.5, head: -0.08, hair: -1.0 }],
+    ],
+  },
+
+  // sliding down the wall with sparking claws
+  wall_slide: {
+    loop: true,
+    fps: 24,
+    directional: true,
+    keys: [
+      [2, { armL: 0.68, longL: 1.12, armR: 0.35, kickL: 0.15, kickR: 0.28, sit: 0.14, tilt: 4.5, sy: 1.05, sx: 0.96, smear: [0, -8] }, 'slide_spark'],
+      [2, { armL: 0.64, longL: 1.1, armR: 0.38, kickL: 0.22, kickR: 0.18, sit: 0.15, tilt: 5, sy: 1.03, sx: 0.98, smear: [0, -6] }],
+    ],
+  },
+
   // asleep: arms hanging, head dropped; every so often it falls a bit further and she jolts awake
   sleep: {
     loop: true,
@@ -451,6 +517,108 @@ export const ACTS = {
       [2, { sy: 1.1, sx: 0.93, mane: 0.26, head: -0.04, smear: [0, -12], armL: 0.55, armR: 0.82 }],
     ],
   },
+
+  // leaping off a wall into the air with momentum
+  wall_leap: {
+    priority: 3,
+    fps: 24,
+    directional: true,
+    keys: [
+      // 1. Coil against wall (anticipation)
+      [3, { sy: 0.84, sx: 1.12, bob: 5, tilt: 10, arms: -0.35, mane: 0.18, kickL: 0.38, kickR: 0.38, sit: 0.28 }, 'coil'],
+      // 2. Explode off wall (launch)
+      [1, { sy: 1.22, sx: 0.88, bob: -18, tilt: -14, arms: 0.75, mane: 0.5, smear: [16, -10], echo: [10, 0] }, 'launch'],
+      // 3. Air travel arc
+      [2, { sy: 1.1, sx: 0.94, bob: -28, tilt: -10, arms: 0.9, mane: 0.4, echo: [6, 0] }],
+      [3, { sy: 1.02, sx: 0.98, bob: -24, tilt: -6, arms: 0.6, mane: 0.25 }],
+      [2, { arms: 0.2, tilt: 0 }],
+      [1, {}],
+    ],
+  },
+
+  // leaping off wall with a full 360-degree somersault tuck (front flip)
+  wall_leap_flip: {
+    priority: 3,
+    fps: 24,
+    directional: true,
+    keys: [
+      // 1. Deep coil against wall (anticipation)
+      [3, { sy: 0.8, sx: 1.15, bob: 6, tilt: 14, arms: -0.4, mane: 0.2, kickL: 0.42, kickR: 0.42, sit: 0.3 }, 'coil'],
+      // 2. Powerful launch kick off wall
+      [1, { sy: 1.28, sx: 0.85, bob: -20, tilt: -20, arms: 0.82, mane: 0.55, smear: [20, -12], echo: [14, 0] }, 'launch'],
+      // 3. Tuck into tight somersault ball while rotating 360 deg
+      [2, { sy: 0.82, sx: 0.82, bob: -36, tilt: -90, arms: -0.65, kickL: 0.55, kickR: 0.55, mane: 0.4, smear: [16, -14], echo: [10, 0] }],
+      [2, { sy: 0.78, sx: 0.78, bob: -44, tilt: -180, arms: -0.72, kickL: 0.62, kickR: 0.62, mane: -0.3, echo: [8, 0] }],
+      [2, { sy: 0.82, sx: 0.82, bob: -40, tilt: -270, arms: -0.55, kickL: 0.45, kickR: 0.45, mane: 0.25, echo: [6, 0] }],
+      // 4. Open up from flip into flight arc
+      [2, { sy: 1.12, sx: 0.9, bob: -30, tilt: -360, arms: 0.6, mane: 0.35, smear: [12, -4] }],
+      [2, { sy: 1.02, sx: 0.98, bob: -20, tilt: 0, arms: 0.3, mane: 0.2 }],
+      [1, {}],
+    ],
+  },
+
+  // leaping off wall with a corkscrew barrel roll (horizontal spin with echoes)
+  wall_leap_spin: {
+    priority: 3,
+    fps: 24,
+    directional: true,
+    keys: [
+      // 1. Coil against wall
+      [3, { sy: 0.82, sx: 1.14, bob: 5, tilt: 10, arms: -0.35, mane: 0.18, kickL: 0.38, kickR: 0.38, sit: 0.28 }, 'coil'],
+      // 2. Launch off wall with lateral spin impulse
+      [1, { sy: 1.24, sx: 0.88, bob: -18, tilt: -12, arms: 0.72, mane: 0.5, smear: [18, -10], echo: [12, 0] }, 'launch'],
+      // 3. Corkscrew spin frames (sx flipping back & forth with afterimages)
+      [1, { sx: 0.4, sy: 1.05, bob: -30, tilt: -8, echo: [16, 0], mane: 0.4, arms: 0.35 }],
+      [1, { sx: -0.3, sy: 1.05, bob: -34, tilt: -8, echo: [18, 0], mane: 0.45, arms: 0.4 }],
+      [1, { sx: -1.0, sy: 1.02, bob: -32, tilt: -6, echo: [14, 0], mane: 0.4, arms: 0.35 }],
+      [1, { sx: -0.3, sy: 1.02, bob: -28, tilt: -6, echo: [16, 0], mane: 0.35, arms: 0.3 }],
+      [1, { sx: 0.4, sy: 1.04, bob: -24, tilt: -4, echo: [12, 0], mane: 0.3, arms: 0.25 }],
+      // 4. Stabilize into landing flight
+      [2, { sx: 1.05, sy: 0.98, bob: -18, tilt: -2, mane: 0.2, arms: 0.15 }],
+      [1, {}],
+    ],
+  },
+
+  // leaping off wall with a streamlined superhero dive glide
+  wall_leap_dive: {
+    priority: 3,
+    fps: 24,
+    directional: true,
+    keys: [
+      // 1. Low spring coil
+      [3, { sy: 0.8, sx: 1.15, bob: 6, tilt: 12, arms: -0.4, mane: 0.2, kickL: 0.4, kickR: 0.4, sit: 0.3 }, 'coil'],
+      // 2. Rocket explosion off wall
+      [1, { sy: 1.34, sx: 0.8, bob: -15, tilt: -28, arms: 0.95, long: 1.32, mane: 0.6, smear: [26, -10], echo: [16, 0] }, 'launch'],
+      // 3. Superman dive flight: streamlined body, forward reaching claws
+      [3, { sy: 1.25, sx: 0.85, bob: -26, tilt: -24, arms: 0.9, long: 1.26, mane: 0.5, echo: [12, 0] }],
+      [3, { sy: 1.15, sx: 0.9, bob: -24, tilt: -18, arms: 0.8, long: 1.16, mane: 0.35 }],
+      [2, { sy: 1.05, sx: 0.95, bob: -18, tilt: -10, arms: 0.4, mane: 0.2 }],
+      [1, {}],
+    ],
+  },
+
+  // tripping & slipping while walking: foot skids out, body tilts back into air, thumps down hard
+  trip: {
+    priority: 3,
+    fps: 24,
+    directional: true,
+    keys: [
+      // 1. Slip: front foot skids forward, torso violently pitches back
+      [2, { kickL: 0.72, kickR: -0.28, armL: 0.95, armR: 0.75, bob: 2, tilt: -24, sy: 1.08, sx: 0.94, smear: [16, 4], head: -0.15 }, 'trip_slip'],
+      // 2. Air panic: completely loses balance, airborne and flailing
+      [2, { kickL: 0.88, kickR: 0.22, armL: 1.15, armR: 0.95, bob: -16, tilt: -46, sy: 1.14, sx: 0.9, smear: [12, -8], mane: 0.45, head: -0.22 }],
+      [2, { kickL: 0.45, kickR: 0.82, armL: 0.75, armR: 1.12, bob: -12, tilt: -62, sy: 1.06, sx: 0.96, mane: 0.35, head: -0.26 }],
+      // 3. Impact: slams flat onto floor, squashed down
+      [2, { kickL: 0.2, kickR: 0.2, sit: 0.38, arms: -0.45, bob: 8, tilt: -14, sy: 0.72, sx: 1.28, mane: -0.25, smear: [0, 8] }, 'trip_impact'],
+      // 4. Dazed / rubbing head, "ouch" moment
+      [10, { kickL: 0.16, kickR: 0.16, sit: 0.32, arms: -0.38, bob: 6, tilt: -8, sy: 0.82, sx: 1.18, head: 0.2, mane: -0.15 }],
+      [10, { kickL: 0.1, kickR: 0.1, sit: 0.25, arms: -0.25, bob: 5, tilt: 5, sy: 0.88, sx: 1.12, head: -0.16, mane: 0.05 }],
+      // 5. Shake it off, slowly push back up to standing
+      [6, { kickL: 0.05, kickR: 0.05, sit: 0.15, arms: -0.1, bob: 3, tilt: 2, sy: 0.95, sx: 1.04, head: 0.05 }],
+      [3, { bob: 1, sy: 0.98, sx: 1.01 }],
+      [1, {}],
+    ],
+  },
 };
 
 export class Player {
@@ -494,6 +662,20 @@ export class Player {
       if (pose.tilt !== undefined) out.tilt = pose.tilt * this.dir;
       if (pose.smear) out.smear = [pose.smear[0] * lean, pose.smear[1]];
       if (pose.echo) out.echo = [pose.echo[0] * lean, pose.echo[1]];
+      if (lean < 0) {
+        if (pose.armL !== undefined && pose.armR !== undefined) {
+          out.armL = pose.armR;
+          out.armR = pose.armL;
+        }
+        if (pose.longL !== undefined && pose.longR !== undefined) {
+          out.longL = pose.longR;
+          out.longR = pose.longL;
+        }
+        if (pose.kickL !== undefined && pose.kickR !== undefined) {
+          out.kickL = pose.kickR;
+          out.kickR = pose.kickL;
+        }
+      }
     }
     if (pose.arms !== undefined) {
       out.armL = pose.arms;

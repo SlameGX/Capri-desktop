@@ -11,7 +11,7 @@ import { Setup } from './setup.js';
 import { Custom } from './custom.js';
 import { Inspector } from './inspector.js';
 import { linesFor } from './lines.js';
-import { pick, fmt, reducedMotion } from './util.js';
+import { pick, fmt, reducedMotion, rand } from './util.js';
 
 const host = window.host;
 
@@ -215,6 +215,17 @@ async function boot() {
       hold: 2400,
     });
   };
+  capri.onTripFall = () => {
+    voice.play('ouch');
+    capri.hurt();
+    panel.say({
+      kind: 'alert',
+      face: 'wide',
+      badge: 'OUCH',
+      line: 'Ouch~',
+      hold: 2400,
+    });
+  };
 
   // Her guide (guide.js): her welcome on first launch, and "How does it work?" in her menu,
   // where she takes you to things and points at them.
@@ -374,6 +385,102 @@ async function boot() {
       case 'teleport':
         capri.teleport(capri.spot('random'));
         break;
+      case 'testWalk': {
+        if (capri.stowed) {
+          host.setConfig({ visible: true });
+          await capri.unstow();
+        }
+        capri.wake();
+        if (capri.stance === 'peek') await capri.unpeek();
+        if (capri.stance === 'wall_hang' || capri.stance === 'climb' || capri.stance === 'wall_slide') {
+          capri.stopClimbing();
+          capri.settleLanded('stand', null);
+        }
+        const win = capri.perch ? capri.perchWin(capri.perch.id) : null;
+        if (win) {
+          capri.walkLedge(win);
+        } else {
+          const targetX = capri.pos.x > capri.view.w * 0.5
+            ? rand(80, capri.view.w * 0.35)
+            : rand(capri.view.w * 0.65, capri.view.w - 80);
+          capri.walkTo(targetX, { speed: 140 });
+        }
+        break;
+      }
+      case 'testClimb': {
+        if (capri.stowed) {
+          host.setConfig({ visible: true });
+          await capri.unstow();
+        }
+        capri.wake();
+        if (capri.stance === 'peek') await capri.unpeek();
+        const side = capri.pos.x < capri.view.w * 0.5 ? 'left' : 'right';
+        const s = capri.scale;
+        const wallX = side === 'left' ? 40 * s + 15 : capri.view.w - (40 * s + 15);
+        if (Math.abs(capri.pos.x - wallX) > 120) {
+          capri.walkTo(wallX, { climbOnWall: true, speed: 170 });
+        } else {
+          capri.startClimb(side, { targetY: capri.view.h * 0.38 });
+        }
+        break;
+      }
+      case 'testTrip': {
+        if (capri.stowed) {
+          host.setConfig({ visible: true });
+          await capri.unstow();
+        }
+        capri.wake();
+        if (capri.stance === 'peek') await capri.unpeek();
+        const s = capri.scale;
+        const minX = 40 * s + 15;
+        const maxX = capri.view.w - (40 * s + 15);
+        const dist = 320;
+        const targetX = capri.pos.x < capri.view.w * 0.5
+          ? Math.min(maxX, capri.pos.x + dist)
+          : Math.max(minX, capri.pos.x - dist);
+        capri.walkTo(targetX, { speed: 155, forceTrip: true });
+        break;
+      }
+      case 'testLeap':
+      case 'testLeapFlip':
+      case 'testLeapSpin':
+      case 'testLeapDive': {
+        if (capri.stowed) {
+          host.setConfig({ visible: true });
+          await capri.unstow();
+        }
+        capri.wake();
+        if (capri.stance === 'peek') await capri.unpeek();
+        if (capri.stance !== 'wall_hang') {
+          const side = capri.pos.x < capri.view.w * 0.5 ? 'left' : 'right';
+          capri.hangOnWall(side);
+          capri.pos.y = Math.min(capri.pos.y, capri.view.h * 0.45);
+        }
+        const styleMap = {
+          testLeap: 'random',
+          testLeapFlip: 'flip',
+          testLeapSpin: 'spin',
+          testLeapDive: 'dive',
+        };
+        const style = styleMap[cmd.command] || 'random';
+        setTimeout(() => capri.wallLeap(style), 250);
+        break;
+      }
+      case 'testSlide': {
+        if (capri.stowed) {
+          host.setConfig({ visible: true });
+          await capri.unstow();
+        }
+        capri.wake();
+        if (capri.stance === 'peek') await capri.unpeek();
+        const side = capri.pos.x < capri.view.w * 0.5 ? 'left' : 'right';
+        const s = capri.scale;
+        const wallX = side === 'left' ? 40 * s + 15 : capri.view.w - (40 * s + 15);
+        capri.pos.x = wallX;
+        capri.pos.y = Math.min(capri.pos.y, capri.view.h * 0.35);
+        capri.wallSlide();
+        break;
+      }
       case 'status':
         brain.status();
         break;

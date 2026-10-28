@@ -56,6 +56,9 @@ glitches, comments on every action, comes to find you when it needs your permiss
 
 ### She gets around
 
+- **She roams and walks your desktop**: in her idle time, she walks across the bottom of the screen or along window ledges with an anime cel-timed walk cycle (alternating arms, leg kicks, subtle forward tilt, mane swaying, and footstep particles). Very rarely, she might trip and slip flat on her back with an adorable "Ouch~" exclamation!
+- **She climbs walls**: walking into the screen border lets her claw onto the screen wall and climb up to higher vantage points with hand-over-hand grip cues.
+- **Wall perching, leaping & acrobatics**: while hanging on a wall, she can spring back into the desktop with random acrobatic leaps — a standard spring, an aerial 360° somersault tuck flip (`wall_leap_flip`), a corkscrew barrel-roll spin (`wall_leap_spin`), or a streamlined superhero dive (`wall_leap_dive`), slide down trailing sparks, or duck into an edge peek. All movement styles can also be individually tested directly via the tray menu.
 - **She sits on your windows**: perched on the top edge of a window, legs dangling and kicking one after the other.
   She rides along when you move the window, and falls off when you close, minimize or cover it.
   While Claude works she settles on the window in front if she can.
