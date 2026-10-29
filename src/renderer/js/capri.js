@@ -399,8 +399,8 @@ export class Capri {
       p.sit = 0;
     }
     if (!this.act && this.stance === 'fall' && (Math.abs(this.vx) > 50 || Math.abs(this.vy) > 100)) {
-      p.smear = [-clamp(this.vx * 0.01, -14, 14), -clamp(this.vy * 0.012, -18, 18)];
-      p.echo = [-clamp(this.vx * 0.005, -8, 8), -clamp(this.vy * 0.006, -10, 10)];
+      p.smear = [-clamp(this.vx * 0.015, -18, 18), -clamp(this.vy * 0.015, -24, 24)];
+      p.echo = [-clamp(this.vx * 0.008, -12, 12), -clamp(this.vy * 0.008, -14, 14)];
     }
     // on a ledge she stays seated: no lifting off it, no sinking through it
     const bob = this.stance === 'sit' ? clamp(pose.bob, -3, 2) : pose.bob;
@@ -408,8 +408,14 @@ export class Capri {
     if ((this.act || this.stance !== 'fall') && !this.dragging) {
       this.tilt = pose.tilt;
     }
-    this.sx = pose.sx;
-    this.sy = pose.sy;
+    if (!this.act && this.stance === 'fall') {
+      const speedStretch = clamp(Math.abs(this.vy) / 2800, 0, 0.16);
+      this.sy = pose.sy + speedStretch;
+      this.sx = pose.sx - speedStretch * 0.55;
+    } else {
+      this.sx = pose.sx;
+      this.sy = pose.sy;
+    }
     if (this.debug) Object.assign(p, this.debug); // --dev pose overrides
     if (cue) this.onCue(cue);
   }
@@ -1021,6 +1027,9 @@ export class Capri {
         this.voice.play('blip', { mood: 'alert' });
         this.fx.burst(this.pos.x, this.pos.y - 4, { count: 6, power: 0.35, spread: 22 * s });
         break;
+      case 'land_impact':
+        this.voice.play('tick', { soft: true });
+        break;
       case 'trip_impact':
         this.voice.play('tick');
         this.fx.burst(this.pos.x, this.pos.y - 4, { count: 12, power: 0.55, spread: 35 * s });
@@ -1595,13 +1604,28 @@ export class Capri {
         this.vRot *= Math.pow(0.90, dt * 60);
       } else {
         const targetTilt = clamp(this.vx * 0.04, -30, 30);
-        this.tilt = lerp(this.tilt, targetTilt, 0.18);
+        // Dynamic air turbulence wobble: rushing air buffeting her body
+        const windWobble = Math.abs(this.vy) > 250
+          ? Math.sin(now * 0.015) * clamp(Math.abs(this.vy) / 1600, 0, 1) * 4.5
+          : 0;
+        this.tilt = lerp(this.tilt, targetTilt + windWobble, 0.18);
       }
     }
 
     // Facing direction matches travel if moving horizontally
     if (Math.abs(this.vx) > 30) {
       this.faceToward(this.pos.x + this.vx);
+    }
+
+    // Speed trails & air streaks during high-speed free fall
+    if (this.vy > 850 && !reducedMotion.matches) {
+      this.lastWindTrail = this.lastWindTrail || 0;
+      if (now - this.lastWindTrail > 80) {
+        this.lastWindTrail = now;
+        const streakX = this.pos.x + (Math.random() - 0.5) * 36 * s;
+        const streakY = this.pos.y - rand(40, 90) * s;
+        this.fx.streak(streakX, streakY, streakX, streakY - rand(35, 70) * s, { life: 85 });
+      }
     }
 
     const prevX = this.pos.x;
@@ -1699,8 +1723,9 @@ export class Capri {
           if (nextX >= win.x + 40 && nextX <= win.x + win.w - 40 && !this.covered(win, nextX)) {
             if (Math.abs(this.vx) < 550) {
               const dx = clamp(nextX - win.x, 40, win.w - 40);
+              const impactVy = Math.abs(this.vy);
               this.pos = this.seat(win, dx);
-              this.settleLanded('sit', { id: win.id, dx });
+              this.settleLanded('sit', { id: win.id, dx }, { impactVy });
               return;
             } else {
               nextY = this.seat(win, nextX - win.x).y - 2;
@@ -1718,7 +1743,9 @@ export class Capri {
     // 7. Floor collision & landing
     if (nextY >= maxY) {
       nextY = maxY;
+      const impactVy = this.lastImpactVy || Math.abs(this.vy);
       if (this.vy > 320 && (this.bounces || 0) < 3) {
+        this.lastImpactVy = Math.abs(this.vy);
         this.bounces = (this.bounces || 0) + 1;
         if (this.flung) {
           this.edgeHits = (this.edgeHits || 0) + 1;
@@ -1739,7 +1766,7 @@ export class Capri {
           this.tilt = clamp(this.vx * 0.03, -20, 20);
         } else {
           this.pos = { x: nextX, y: maxY };
-          this.settleLanded('stand', null);
+          this.settleLanded('stand', null, { impactVy });
           return;
         }
       }
@@ -1749,7 +1776,9 @@ export class Capri {
     this.place();
   }
 
-  settleLanded(stance, perch) {
+  settleLanded(stance, perch, { impactVy = 0 } = {}) {
+    const hardImpact = impactVy > 550 || this.flung;
+    this.lastImpactVy = 0;
     this.vx = 0;
     this.vy = 0;
     this.vRot = 0;
@@ -1763,14 +1792,23 @@ export class Capri {
     const s = this.scale;
     if (stance === 'sit') {
       this.perform('plop');
+      if (hardImpact) {
+        this.fx.burst(this.pos.x, this.pos.y - 10 * s, { count: 8, power: 0.4, spread: 30 * s });
+      }
     } else {
       this.perform('land');
-      this.fx.burst(this.pos.x, this.pos.y - 20 * s, { count: 12, power: 0.6, spread: 60 * s });
+      const burstCount = hardImpact ? 20 : 12;
+      const burstPower = hardImpact ? 0.8 : 0.55;
+      const burstSpread = hardImpact ? 80 * s : 50 * s;
+      this.fx.burst(this.pos.x, this.pos.y - 20 * s, { count: burstCount, power: burstPower, spread: burstSpread });
+      if (hardImpact) {
+        this.fx.ring(this.pos.x, this.pos.y - 6, { size: 0.5 });
+      }
     }
     this.voice.play('land');
     const p = this.p;
     p.glitchSeed = Math.random() * 100;
-    p.glitch = 0.3;
+    p.glitch = hardImpact ? 0.32 : 0.22;
     setTimeout(() => { p.glitch = 0; }, ON_ONES * 3);
     this.onTeleport?.('end');
     this.place();

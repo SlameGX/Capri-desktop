@@ -278,6 +278,7 @@ function rebuildTray() {
       submenu: [
         { label: t.walkTest, click: () => sendCommand('testWalk') },
         { label: t.tripTest, click: () => sendCommand('testTrip') },
+        { label: t.fallTest, click: () => sendCommand('testFall') },
         { label: t.climbTest, click: () => sendCommand('testClimb') },
         { label: t.slideTest, click: () => sendCommand('testSlide') },
         { type: 'separator' },

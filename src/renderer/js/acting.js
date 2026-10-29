@@ -485,14 +485,21 @@ export const ACTS = {
     ],
   },
 
-  // landing after a fall: the impact pushes the arms down, they bounce back past rest
+  // landing after a fall: deep impact absorption with knee bend, spring recoil, and settle
   land: {
     priority: 3,
     fps: 24,
     keys: [
-      [2, { sy: 0.72, sx: 1.22, bob: 6, mane: -0.22, arms: -0.4 }],
-      [2, { sy: 0.88, sx: 1.08, bob: 3, mane: -0.1, arms: -0.15 }],
-      [2, { sy: 1.05, sx: 0.97, mane: 0.1, arms: 0.1 }],
+      // 1. High-impact contact: deep knee crouch, hands brace on ground, mane compressed downward
+      [2, { sy: 0.62, sx: 1.34, bob: 8, mane: -0.32, arms: -0.55, sit: 0.38, kickL: 0.35, kickR: 0.35, head: 0.16, smear: [0, 10] }, 'land_impact'],
+      // 2. Shock absorption hold: absorbing the kinetic energy
+      [2, { sy: 0.72, sx: 1.24, bob: 6, mane: -0.22, arms: -0.45, sit: 0.30, kickL: 0.25, kickR: 0.25, head: 0.12 }],
+      // 3. Spring rebound: popping up past rest height with upward mane follow-through
+      [3, { sy: 1.10, sx: 0.93, bob: -6, mane: 0.25, hair: 2.0, arms: 0.22, sit: 0, head: -0.06 }],
+      // 4. Secondary recoil: gentle secondary compression
+      [2, { sy: 0.95, sx: 1.03, bob: 2, mane: -0.08, hair: -1.0, arms: -0.08, head: 0.02 }],
+      // 5. Settling back into neutral standing posture
+      [2, { sy: 1.01, sx: 0.99, bob: -1, mane: 0.04, arms: 0.04 }],
       [1, {}],
     ],
   },
@@ -502,19 +509,39 @@ export const ACTS = {
     priority: 3,
     fps: 24,
     keys: [
-      [2, { sy: 0.85, sx: 1.1, mane: -0.12, kickL: 0.3, kickR: 0.3, arms: -0.55 }],
-      [2, { sy: 1.05, sx: 0.97, kickL: 0.12, kickR: 0.12, arms: -0.38 }],
+      // 1. Hands hit sill, legs swing forward, mane compressed
+      [2, { sy: 0.80, sx: 1.18, bob: 4, mane: -0.22, kickL: 0.48, kickR: 0.48, arms: -0.58, head: 0.12, smear: [0, 6] }],
+      // 2. Catch & recoil: torso rebounds upright, legs swing outward
+      [2, { sy: 1.08, sx: 0.95, bob: -3, mane: 0.18, kickL: 0.32, kickR: 0.35, arms: -0.36, head: -0.06 }],
+      // 3. Finding balance on the ledge
+      [2, { sy: 0.96, sx: 1.02, bob: 1, mane: -0.06, kickL: 0.18, kickR: 0.12, arms: -0.44, head: 0.04 }],
+      // 4. Settled comfortably on ledge
+      [2, { sy: 1.02, sx: 0.98, kickL: 0.22, kickR: 0.02, arms: -0.40 }],
       [1, {}],
     ],
   },
 
-  // while falling: stretched, mane blown up, arms flailing every other drawing
+  // while falling: expressive anime flailing, legs paddling, mane billowing in the updraft, air turbulence
   fall: {
     loop: true,
     fps: 24,
     keys: [
-      [2, { sy: 1.12, sx: 0.92, mane: 0.36, head: 0.05, smear: [0, -16], armL: 0.8, armR: 0.55 }],
-      [2, { sy: 1.1, sx: 0.93, mane: 0.26, head: -0.04, smear: [0, -12], armL: 0.55, armR: 0.82 }],
+      // 1. Left arm flails high into updraft, right arm reaches wide, left leg extends forward
+      [2, { sy: 1.14, sx: 0.90, bob: -4, mane: 0.48, hair: -3.5, head: 0.08, armL: 1.15, armR: 0.52, longL: 1.08, kickL: 0.38, kickR: -0.18, smear: [0, -16] }],
+      // 2. Air churn: arms crossing, knees switching through center
+      [2, { sy: 1.11, sx: 0.92, bob: -1, mane: 0.54, hair: -1.0, head: 0.03, armL: 0.88, armR: 0.78, longL: 1.02, longR: 1.02, kickL: 0.15, kickR: 0.12, smear: [0, -18] }],
+      // 3. Right arm thrusts high into wind, left arm balances, right leg kicks outward
+      [2, { sy: 1.15, sx: 0.89, bob: -3, mane: 0.46, hair: 3.5, head: -0.07, armL: 0.48, armR: 1.20, longR: 1.08, kickL: -0.16, kickR: 0.42, smear: [0, -16] }],
+      // 4. Right arm sweeping down, left arm rising, hair whips through center
+      [2, { sy: 1.12, sx: 0.91, bob: 0, mane: 0.50, hair: 1.2, head: -0.02, armL: 0.75, armR: 0.85, longL: 1.02, kickL: 0.12, kickR: 0.18, smear: [0, -14] }],
+      // 5. Updraft surge: strong gust sweeps both arms high, mane flares violently, both legs trailing
+      [2, { sy: 1.18, sx: 0.87, bob: -6, mane: 0.60, hair: -2.0, head: 0.05, armL: 1.22, armR: 1.16, longL: 1.10, longR: 1.10, kickL: 0.28, kickR: 0.28, smear: [0, -22] }],
+      // 6. Fighting the drag: arms tucking inward slightly, panic kick
+      [2, { sy: 1.13, sx: 0.91, bob: -2, mane: 0.52, hair: 2.5, head: -0.04, armL: 0.95, armR: 0.62, kickL: 0.42, kickR: -0.12, smear: [0, -16] }],
+      // 7. Frantic flutter: alternating paddle, arms swapping rapidly
+      [2, { sy: 1.12, sx: 0.92, bob: 1, mane: 0.45, hair: -2.5, head: 0.06, armL: 0.58, armR: 1.02, longR: 1.04, kickL: -0.12, kickR: 0.36, smear: [0, -14] }],
+      // 8. Returning to top of cycle, stabilizing for next surge
+      [2, { sy: 1.14, sx: 0.90, bob: -2, mane: 0.52, hair: 0.5, head: 0.02, armL: 0.92, armR: 0.68, kickL: 0.22, kickR: 0.08, smear: [0, -16] }],
     ],
   },
 

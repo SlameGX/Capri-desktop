@@ -70,6 +70,19 @@ test('Acting: walk, climb, wall_hang, wall_slide, and wall_leap acts are properl
   assert.ok(slipCue, 'trip must have trip_slip cue');
   assert.ok(impactCue, 'trip must have trip_impact cue');
 
+  // Fall act: multi-frame expressive flailing animation
+  assert.ok(ACTS.fall, 'ACTS.fall must exist');
+  assert.equal(ACTS.fall.loop, true);
+  assert.equal(ACTS.fall.fps, 24);
+  assert.ok(ACTS.fall.keys.length >= 6, 'fall cycle must have rich flailing keyframes');
+
+  // Land act: deep impact squash, rebound, and settle
+  assert.ok(ACTS.land, 'ACTS.land must exist');
+  assert.equal(ACTS.land.priority, 3);
+  assert.equal(ACTS.land.fps, 24);
+  const landImpactCue = ACTS.land.keys.find(([, , cue]) => cue === 'land_impact');
+  assert.ok(landImpactCue, 'land act must have land_impact cue');
+
   // 6. Player.resolve: directional mirroring of limbs
   const walkPlayerRight = new Player('walk', { dir: 1 });
   const poseRight = walkPlayerRight.resolve(ACTS.walk.keys[0][1], -1); // facing -1 (right), dir 1 => lean = -1 (mirrored)
@@ -224,6 +237,15 @@ test('Capri: walking and wall climbing state machine and physics', async () => {
   };
   await capri.trip();
   assert.ok(tripDone, 'capri.trip should trigger trip act');
+
+  // Test fall stance and physics
+  capri.pos = { x: 500, y: 200 };
+  capri.fall({ vx: 10, vy: 50 });
+  assert.equal(capri.stance, 'fall');
+  const fallStartY = capri.pos.y;
+  capri.updateFall(performance.now() + 50);
+  assert.ok(capri.pos.y > fallStartY, 'capri should fall downward under gravity');
+  capri.setStance('stand');
 
   // 5. Test stopWalking and stopClimbing clean up properly
   capri.walkTo(600);

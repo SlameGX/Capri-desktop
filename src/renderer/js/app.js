@@ -441,6 +441,17 @@ async function boot() {
         capri.walkTo(targetX, { speed: 155, forceTrip: true });
         break;
       }
+      case 'testFall': {
+        if (capri.stowed) {
+          host.setConfig({ visible: true });
+          await capri.unstow();
+        }
+        capri.wake();
+        if (capri.stance === 'peek') await capri.unpeek();
+        capri.pos.y = Math.max(160, capri.view.h * 0.25);
+        capri.fall({ vx: (Math.random() - 0.5) * 60, vy: 0 });
+        break;
+      }
       case 'testLeap':
       case 'testLeapFlip':
       case 'testLeapSpin':
