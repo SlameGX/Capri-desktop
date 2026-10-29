@@ -31,18 +31,32 @@ const DEFAULTS = {
   motion: 'auto',    // her animations: 'auto' (like Windows' animation effects), 'full' or 'reduced'
   motionAsked: false, // she asked once, Windows' animations being off, whether to move anyway
   render: 'auto',   // how her window is drawn: 'auto', 'gl' (OpenGL) or 'software' (no graphics card), for PCs that show it black
+  telegram: {
+    enabled: false,
+    token: '',
+    allowedUserId: '', // string of authorized Telegram user/chat ID (STRICT WHITELIST)
+    notifyClaude: true, // forward Claude Code task completions and notifications to phone
+  },
 };
 
 let cache = null;
 
 function file() {
-  return path.join(app.getPath('userData'), 'config.json');
+  const dir = (app && typeof app.getPath === 'function')
+    ? app.getPath('userData')
+    : path.join(process.env.APPDATA || process.env.HOME || '.', 'capri-desktop');
+  return path.join(dir, 'config.json');
 }
 
 function load(fresh = false) {
   if (cache && !fresh) return cache;
   try {
-    cache = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(file(), 'utf8')) };
+    const raw = JSON.parse(fs.readFileSync(file(), 'utf8'));
+    cache = {
+      ...DEFAULTS,
+      ...raw,
+      telegram: { ...DEFAULTS.telegram, ...(raw.telegram || {}) },
+    };
   } catch {
     cache = { ...DEFAULTS };
   }
@@ -50,7 +64,9 @@ function load(fresh = false) {
 }
 
 function save(patch) {
-  cache = { ...load(), ...patch };
+  const current = load();
+  const telegram = patch.telegram ? { ...current.telegram, ...patch.telegram } : current.telegram;
+  cache = { ...current, ...patch, telegram };
   try {
     fs.mkdirSync(path.dirname(file()), { recursive: true });
     fs.writeFileSync(file(), JSON.stringify(cache, null, 2));
@@ -61,3 +77,4 @@ function save(patch) {
 }
 
 module.exports = { load, save, file, DEFAULTS };
+

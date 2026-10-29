@@ -19,6 +19,7 @@ const TRAY = {
     possess: 'Posséder mes fenêtres', lang: 'Langue', auto: 'Automatique (système)', startup: 'Lancer au démarrage',
     hooksOn: 'Hooks Claude Code : installés', hooksOff: 'Installer les hooks Claude Code',
     hooksRemove: 'Retirer les hooks Claude Code', forget: 'Oublier nos conversations', quit: 'Quitter',
+    telegram: 'Bot Telegram', telegramEnabled: 'Bot Telegram : Actif', telegramDisabled: 'Bot Telegram : Inactif', telegramToken: 'Définir le token du bot…', telegramPair: 'Associer le téléphone (code PIN)…', telegramPaired: (id) => `ID associé : ${id} (Privé)`, telegramNotPaired: 'Non associé (Accès public bloqué)', telegramUnpair: 'Dissocier le téléphone', telegramNotify: 'Notifier les événements Claude',
   },
   en: {
     name: 'English',
@@ -35,6 +36,7 @@ const TRAY = {
     possess: 'Possess my windows', lang: 'Language', auto: 'Automatic (system)', startup: 'Start with Windows',
     hooksOn: 'Claude Code hooks: installed', hooksOff: 'Install Claude Code hooks',
     hooksRemove: 'Remove Claude Code hooks', forget: 'Forget our conversations', quit: 'Quit',
+    telegram: 'Telegram Bot', telegramEnabled: 'Telegram Bot: Active', telegramDisabled: 'Telegram Bot: Disabled', telegramToken: 'Set Bot Token…', telegramPair: 'Pair Phone (PIN code)…', telegramPaired: (id) => `Paired ID: ${id} (Private)`, telegramNotPaired: 'Not Paired (Public Access Blocked)', telegramUnpair: 'Unlink Phone / Reset ID', telegramNotify: 'Notify on Claude events',
   },
   es: {
     name: 'Español',
@@ -51,6 +53,7 @@ const TRAY = {
     possess: 'Poseer mis ventanas', lang: 'Idioma', auto: 'Automático (sistema)', startup: 'Iniciar con Windows',
     hooksOn: 'Hooks de Claude Code: instalados', hooksOff: 'Instalar los hooks de Claude Code',
     hooksRemove: 'Quitar los hooks de Claude Code', forget: 'Olvidar nuestras conversaciones', quit: 'Salir',
+    telegram: 'Bot de Telegram', telegramEnabled: 'Bot de Telegram: Activo', telegramDisabled: 'Bot de Telegram: Inactivo', telegramToken: 'Configurar token del bot…', telegramPair: 'Vincular teléfono (código PIN)…', telegramPaired: (id) => `ID vinculado: ${id} (Privado)`, telegramNotPaired: 'No vinculado (Acceso público bloqueado)', telegramUnpair: 'Desvincular teléfono', telegramNotify: 'Notificar eventos de Claude',
   },
   pt: {
     name: 'Português (Brasil)',
@@ -67,6 +70,7 @@ const TRAY = {
     possess: 'Possuir minhas janelas', lang: 'Idioma', auto: 'Automático (sistema)', startup: 'Iniciar com o Windows',
     hooksOn: 'Hooks do Claude Code: instalados', hooksOff: 'Instalar os hooks do Claude Code',
     hooksRemove: 'Remover os hooks do Claude Code', forget: 'Esquecer nossas conversas', quit: 'Sair',
+    telegram: 'Bot do Telegram', telegramEnabled: 'Bot do Telegram: Ativo', telegramDisabled: 'Bot do Telegram: Inativo', telegramToken: 'Definir token do bot…', telegramPair: 'Parear telefone (código PIN)…', telegramPaired: (id) => `ID pareado: ${id} (Privado)`, telegramNotPaired: 'Não pareado (Acesso público bloqueado)', telegramUnpair: 'Desvincular telefone', telegramNotify: 'Notificar eventos do Claude',
   },
   ru: {
     name: 'Русский',
@@ -83,7 +87,9 @@ const TRAY = {
     possess: 'Вселяться в мои окна', lang: 'Язык', auto: 'Автоматически (системный)', startup: 'Запускать вместе с Windows',
     hooksOn: 'Хуки Claude Code: установлены', hooksOff: 'Установить хуки Claude Code',
     hooksRemove: 'Удалить хуки Claude Code', forget: 'Забыть наши разговоры', quit: 'Выйти',
+    telegram: 'Телеграм-бот', telegramEnabled: 'Телеграм-бот: Активен', telegramDisabled: 'Телеграм-бот: Выключен', telegramToken: 'Указать токен бота…', telegramPair: 'Привязать телефон (PIN-код)…', telegramPaired: (id) => `Привязан ID: ${id} (Личный)`, telegramNotPaired: 'Не привязан (Публичный доступ закрыт)', telegramUnpair: 'Отвязать телефон', telegramNotify: 'Уведомления о событиях Claude',
   },
 };
 
 module.exports = { TRAY, LANGS: Object.keys(TRAY) };
+

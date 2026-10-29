@@ -316,4 +316,52 @@ export class Setup {
     const n = new Intl.NumberFormat(this.brain.lang, { maximumFractionDigits: gb ? 1 : 0 }).format(gb ? bytes / 1e9 : bytes / 1e6);
     return `${n} ${gb ? this.t.gb : this.t.mb}`;
   }
+
+  async telegram() {
+    await this.guide.scene(async () => {
+      const cfg = await this.host.getConfig();
+      const currentToken = cfg.telegram?.token || '';
+      const got = await this.guide.askText({
+        face: 'look',
+        line: 'Telegram Bot Token',
+        quote: '@BotFather üzerinden aldığın bot tokenini gir:\n(Örn: 123456789:ABCdef...)',
+        placeholder: currentToken ? 'Token kayıtlı (değiştirmek için yaz)' : '123456789:ABC...',
+        tag: 'TOKEN',
+        note: 'Sadece senin telefonunla bağlanmak için kullanılır. Asla public olmaz.',
+        actions: [
+          { id: 'botfather', label: '@BotFather Aç' },
+          { id: 'cancel', label: 'Vazgeç' },
+        ],
+        onAction: (id) => id === 'botfather' && (this.host.openSite('https://t.me/BotFather'), true),
+      });
+
+      if (!got?.text && !currentToken) return;
+      const token = got?.text ? got.text.trim() : currentToken;
+      await this.host.setConfig({ telegram: { ...(cfg.telegram || {}), token, enabled: true } });
+
+      if (!cfg.telegram?.allowedUserId) {
+        const pin = await this.host.telegramPair();
+        await this.telegramPin(pin);
+      } else {
+        this.capri.perform('hop');
+        await this.guide.ask({
+          face: 'smug',
+          line: 'Telegram Botu Aktif',
+          quote: `Bot zaten hesabınla eşleştirilmiş (Kullanıcı ID: ${cfg.telegram.allowedUserId}).\nTelefondan botuna mesaj atabilirsin!`,
+          actions: [{ id: 'ok', label: 'Harika', primary: true }],
+        });
+      }
+    });
+  }
+
+  async telegramPin(pin) {
+    this.capri.perform('curious', this.capri.towardCenter());
+    await this.guide.ask({
+      face: 'look',
+      line: 'Telefonunu Eşleştir',
+      quote: `Telegram'da botunu aç ve şu mesajı gönder:\n\n👉 /pair ${pin}\n\n(veya /start ${pin})\n\nKod 10 dakika geçerlidir. Kod girilince sadece senin hesabın yetkilendirilecek.`,
+      actions: [{ id: 'ok', label: 'Anladım', primary: true }],
+    });
+  }
 }
+

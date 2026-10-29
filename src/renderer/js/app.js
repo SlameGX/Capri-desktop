@@ -507,7 +507,23 @@ async function boot() {
       case 'setupKey': // "API key or address" in her menu's AI model, or a service picked there that needs one
         setup.key();
         break;
+      case 'setupTelegram':
+        setup.telegram();
+        break;
+      case 'telegramPairPin':
+        setup.telegramPin(cmd.pin);
+        break;
+      case 'telegramLinked':
+        capri.perform('hop');
+        panel.say({
+          face: 'smug',
+          line: 'Telefonun Bağlandı!',
+          quote: `Telegram hesabın başarıyla eşleştirildi (ID: ${cmd.userId}). Artık sadece seninle konuşacağım choom!`,
+          actions: [{ id: 'ok', label: 'Harika', primary: true }],
+        });
+        break;
       case 'setupFree': // --dev: Claude Code (or Codex) through Ollama
+
         setup.free();
         break;
       case 'setupStep': // --dev: one step of her setup on its own (pickModel, pull, pickKeyed, address…)

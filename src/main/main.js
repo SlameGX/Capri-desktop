@@ -18,6 +18,7 @@ const llm = require('./llm');
 const setup = require('./setup');
 const apps = require('./apps');
 const launch = require('./launch');
+const telegram = require('./telegram');
 const { ASSISTANTS, assistant } = require('./assistants');
 const activeAssistant = () => assistant(config.load().assistant); // Claude Code or Codex
 const activeHooks = () => activeAssistant().hooks;
@@ -250,6 +251,7 @@ function rendererConfig() {
 function updateConfig(patch) {
   config.save(patch);
   if ('rest' in patch) fitOverlay(); // the taskbar in her window or not
+  if ('telegram' in patch) telegram.reload();
   const cfg = rendererConfig();
   overlay?.webContents.send('capri:config', cfg);
   rebuildTray();
@@ -294,6 +296,36 @@ function rebuildTray() {
     { label: t.inspect, click: () => sendCommand('inspect') },
     { label: t.custom, click: () => sendCommand('customize') },
     { label: cfg.visible ? t.hide : t.show, accelerator: 'Ctrl+Alt+C', click: () => toggleVisible() },
+    { type: 'separator' },
+    {
+      label: t.telegram,
+      submenu: [
+        {
+          label: cfg.telegram?.enabled ? t.telegramEnabled : t.telegramDisabled,
+          type: 'checkbox',
+          checked: Boolean(cfg.telegram?.enabled),
+          click: (item) => updateConfig({ telegram: { enabled: item.checked } }),
+        },
+        { type: 'separator' },
+        { label: t.telegramToken, click: promptTelegramToken },
+        { label: t.telegramPair, click: triggerTelegramPairing },
+        {
+          label: cfg.telegram?.allowedUserId ? t.telegramPaired(cfg.telegram.allowedUserId) : t.telegramNotPaired,
+          enabled: false,
+        },
+        ...(cfg.telegram?.allowedUserId ? [{
+          label: t.telegramUnpair,
+          click: () => updateConfig({ telegram: { allowedUserId: '' } }),
+        }] : []),
+        { type: 'separator' },
+        {
+          label: t.telegramNotify,
+          type: 'checkbox',
+          checked: Boolean(cfg.telegram?.notifyClaude !== false),
+          click: (item) => updateConfig({ telegram: { notifyClaude: item.checked } }),
+        },
+      ],
+    },
     { type: 'separator' },
     {
       label: t.size,
@@ -447,8 +479,10 @@ function runHooks(action, { quiet = false } = {}) {
 
 // The model she talks with: the one picked in her menu if it's still installed, else the first.
 function pickModel(cfg = config.load()) {
-  if (!chatModels?.length) return null;
-  return chatModels.includes(cfg.chatModel) ? cfg.chatModel : chatModels[0];
+  if (chatModels?.length) {
+    return chatModels.includes(cfg.chatModel) ? cfg.chatModel : chatModels[0];
+  }
+  return cfg.chatModel || null;
 }
 
 async function refreshModels() {
@@ -468,13 +502,21 @@ async function refreshModels() {
 // (Gemini's "high demand"), or not served anymore (an older model closed to new keys). The model
 // that answered is kept for next time.
 async function chatWithFallback(cfg, messages, send, signal, streamed) {
-  let model = pickModel(cfg);
+  let model = pickModel(cfg) || cfg.chatModel;
+  if (!model && chatModels?.length) model = chatModels[0];
+  if (!model) {
+    await refreshModels().catch(() => {});
+    model = pickModel(cfg) || cfg.chatModel || chatModels?.[0];
+  }
+  if (!model) {
+    throw new Error('Bir model seçilmedi veya bulunamadı. Lütfen Capri ayarlarından bir model seçin.');
+  }
   const tried = new Set();
   let busy = 0;
   for (;;) {
     try {
       const text = await llm.chat(cfg.provider, llmConfig(cfg), { model, messages }, send, signal);
-      if (model !== pickModel(cfg)) updateConfig({ chatModel: model });
+      if (model !== pickModel(cfg) && chatModels?.includes(model)) updateConfig({ chatModel: model });
       return text;
     } catch (err) {
       if (signal.aborted || streamed() || !['busy', 'gone'].includes(err.code)) throw err;
@@ -508,6 +550,51 @@ async function pickClaudeFolder() {
   llm.resetClaude(); // a new folder, a new Claude Code conversation (hers goes on)
   saveMemory({ claude: null });
   updateConfig({ claudeCwd: filePaths[0] });
+}
+
+function promptTelegramToken() {
+  const cfg = config.load();
+  if (overlay && !overlay.isDestroyed() && cfg.visible) {
+    sendCommand('setupTelegram');
+    return;
+  }
+  const currentToken = cfg.telegram?.token || '';
+  const ps = `Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.Interaction]::InputBox('Telegram bot tokeninizi girin (@BotFather\\'dan aldığınız token):', 'Capri Telegram Bot', '${currentToken.replace(/'/g, "''")}')`;
+  execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], (err, out) => {
+    if (err) return;
+    const token = out.trim();
+    if (token) {
+      updateConfig({ telegram: { token, enabled: true } });
+      dialog.showMessageBox({
+        type: 'info',
+        title: 'Capri Telegram Bot',
+        message: 'Token kaydedildi!\n\nŞimdi telefonunuzdan botunuza bağlanmak için menüden "Telefonu Eşle (PIN Kodu)" seçeneğini tıklayın.',
+      });
+    }
+  });
+}
+
+function triggerTelegramPairing() {
+  const cfg = config.load();
+  if (!cfg.telegram?.token) {
+    dialog.showMessageBox({
+      type: 'warning',
+      title: 'Capri Telegram Bot',
+      message: 'Önce bot tokenini ayarlamalısınız!\nMenüden "Bot Tokenini Ayarla..." seçeneğine tıklayın.',
+    });
+    return;
+  }
+
+  const pin = telegram.generatePairingCode();
+  if (overlay && !overlay.isDestroyed() && cfg.visible) {
+    sendCommand('telegramPairPin', { pin });
+  }
+
+  dialog.showMessageBox({
+    type: 'info',
+    title: 'Capri Telegram Eşleştirme',
+    message: `Telegram Eşleştirme Kodunuz:\n\n👉  ${pin}  👈\n\nTelefonunuzda Telegram'ı açın ve botunuza şu mesajı gönderin:\n\n/pair ${pin}   (veya /start ${pin})\n\nBu kod 10 dakika geçerlidir. Kod girildikten sonra bot SADECE sizin mesajlarınıza cevap verecektir.`,
+  });
 }
 
 function createTray() {
@@ -573,6 +660,9 @@ function registerIpc() {
   ipcMain.handle('chat:memory', () => readMemory().history || []);
   ipcMain.on('chat:remember', (_e, history) => Array.isArray(history) && saveMemory({ history }));
   ipcMain.on('chat:ollama', () => shell.openExternal(OLLAMA_SITE));
+  ipcMain.handle('telegram:status', () => telegram.getStatus());
+  ipcMain.handle('telegram:pair', () => telegram.generatePairingCode());
+  ipcMain.handle('telegram:reload', () => telegram.reload());
   // setting her up with buttons (setup.js): Ollama and a model, or a key, or an address
   const progress = (payload) => overlay?.webContents.send('setup:progress', payload);
   let pulling = null; // AbortController of the model being fetched
@@ -828,13 +918,27 @@ function main() {
     createBridge({
       port: PORT,
       // her own Claude Code chat's hooks would cover its answer with theirs
-      onEvent: (evt) => !llm.isChatSession(evt.session_id) && overlay?.webContents.send('claude:event', evt),
+      onEvent: (evt) => {
+        if (!llm.isChatSession(evt.session_id)) overlay?.webContents.send('claude:event', evt);
+        telegram.notifyClaudeEvent(evt);
+      },
       onDebug: DEV ? debugHandler : null,
     });
     globalShortcut.register('Control+Alt+C', () => toggleVisible());
     llm.restoreClaude(readMemory().claude);
     refreshModels(); // for her menu's model list
     setTimeout(() => launch.launchables().catch(() => {}), 20000); // what she can open, before you ask
+    telegram.start({
+      config,
+      chatWithFallback,
+      observer,
+      launch,
+      sendCommand,
+      llm,
+      llmConfig,
+      rebuildTray,
+      pickModel,
+    });
     screen.on('display-metrics-changed', fitOverlay);
     screen.on('display-added', () => { fitOverlay(); rebuildTray(); });
     screen.on('display-removed', () => { fitOverlay(); rebuildTray(); });
@@ -847,6 +951,7 @@ function main() {
     globalShortcut.unregisterAll();
     windowWatch?.stop();
     observer.stopObserverHelper();
+    telegram.stop();
   });
   app.on('window-all-closed', (e) => e.preventDefault());
 }

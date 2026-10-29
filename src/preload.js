@@ -60,4 +60,8 @@ contextBridge.exposeInMainWorld('host', {
   getDesktopObservation: () => ipcRenderer.invoke('observer:latest'),
   onDesktopObservation: on('observer:update'),
   observerStatus: () => ipcRenderer.invoke('observer:status'),
+  telegramStatus: () => ipcRenderer.invoke('telegram:status'),
+  telegramPair: () => ipcRenderer.invoke('telegram:pair'),
+  telegramReload: () => ipcRenderer.invoke('telegram:reload'),
 });
+
