@@ -89,6 +89,7 @@ function mapTool(toolCall) {
         tool_input: {
           file_path: args.Path || args.TargetFile || "",
           content_len: typeof args.Content === "string" ? args.Content.length : 0,
+          content_snippet: typeof args.Content === "string" ? args.Content.slice(0, 1500) : "",
         },
       };
     case "edit_file":
@@ -98,6 +99,8 @@ function mapTool(toolCall) {
         tool_name: "Edit",
         tool_input: {
           file_path: args.Path || args.TargetFile || "",
+          target_snippet: typeof args.Target === "string" ? args.Target.slice(0, 500) : "",
+          replacement_snippet: typeof args.Replacement === "string" ? args.Replacement.slice(0, 1500) : "",
           old_string_len: typeof args.Target === "string" ? args.Target.length : 0,
           new_string_len: typeof args.Replacement === "string" ? args.Replacement.length : 0,
         },

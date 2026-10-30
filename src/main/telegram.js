@@ -7,7 +7,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { execFile } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
+const windowManager = require('./windowManager');
+const apps = require('./apps');
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
 
@@ -17,6 +19,9 @@ let activePairing = null; // { code: string, expiresAt: number }
 let botInfo = null;       // { id, username, first_name }
 let lastUpdateId = 0;
 let chatContext = null;   // { config, chatWithFallback, observer, launch, sendCommand, llm, llmConfig }
+
+// Track active Telegram-initiated Antigravity code session
+let activeTelegramCodeSession = null; // { active, chatId, token, task, startTime, files, commands }
 
 // In-memory conversation history: fromId -> Array<{ role, content }>
 const conversations = new Map();
@@ -38,7 +43,7 @@ function buildCapriPersona(cfg) {
     'How you talk: playful, a little mischievous and teasing, warm underneath, never cruel. Night City slang now and then (choom, preem, nova, gonk, flatline).',
     'Language: If the user talks to you in Turkish, answer in natural Turkish with your cyberpunk flavor. If in English, answer in English. Match whatever language the user speaks.',
     'Rules: Keep it natural and engaging (1 to 3 paragraphs). Avoid robotic meta-talk. Stay in character.',
-    'You have direct access to the user\'s PC via Telegram commands: you can check system status (/status), take a desktop screenshot (/screenshot), inspect what is on the screen (/inspect), lock the PC (/lock), control media (/media), or show messages on screen (/say).',
+    'You have direct access to the user\'s PC via Telegram commands: you can check system status (/status), take a desktop screenshot (/screenshot), inspect what is on the screen (/inspect), lock the PC (/lock), control media (/media), show messages on screen (/say), manage open apps and windows (/apps, /open, /close, /min, /max, /resize), code with Antigravity (/code), and restart Capri terminal session (/restart).',
     userName,
     customPersona,
     memories,
@@ -173,6 +178,144 @@ function captureScreenshot() {
   });
 }
 
+function isTelegramCodeSessionActive() {
+  return Boolean(activeTelegramCodeSession?.active);
+}
+
+function startTelegramCodeSession(chatId, token, task = '') {
+  activeTelegramCodeSession = {
+    active: true,
+    chatId: String(chatId),
+    token: String(token || ''),
+    task: String(task || ''),
+    startTime: Date.now(),
+    files: [],
+    commands: [],
+  };
+  return activeTelegramCodeSession;
+}
+
+function stopTelegramCodeSession() {
+  if (activeTelegramCodeSession) {
+    activeTelegramCodeSession.active = false;
+  }
+}
+
+function triggerRestart({ projectDir, token, chatId }) {
+  const SCRIPT = path.join(__dirname, 'restart.ps1').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+  const oldPid = process.pid;
+  const rootDir = projectDir || path.resolve(__dirname, '..', '..');
+
+  // Use cmd.exe /c start to create a truly independent process tree
+  // that survives the parent terminal closing and Electron exiting.
+  const child = spawn('cmd.exe', [
+    '/c', 'start', '""', 'powershell.exe',
+    '-NoProfile', '-ExecutionPolicy', 'Bypass',
+    '-File', SCRIPT,
+    '-OldPid', String(oldPid),
+    '-ProjectDir', rootDir,
+    '-TelegramToken', token || '',
+    '-TelegramChatId', String(chatId || ''),
+  ], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+
+  child.unref();
+
+  // Allow the Telegram message to finish flushing before stopping
+  setTimeout(() => {
+    try {
+      chatContext?.app?.quit?.();
+    } catch {}
+    process.exit(0);
+  }, 1000);
+}
+
+async function handleNaturalLanguageAction(text, token, chatId, cfg) {
+  const t = text.trim();
+
+  // 1. Restart
+  if (/^(?:restart(?:\s*(?:at|yap|et))?|yeniden\s+ba[sş]lat(?:\s*(?:yap|et))?)$/i.test(t)) {
+    const projectDir = cfg.claudeCwd || path.resolve(__dirname, '..', '..');
+    await safeSendMessage(
+      token,
+      chatId,
+      '🔄 *Capri Yeniden Başlatılıyor...*\n\n1️⃣ Mevcut oturum sonlandırılıyor...\n2️⃣ Detached launcher devreye girdi...\n3️⃣ `npm run dev` başlatılıyor!\n\n_Lütfen birkaç saniye bekle choom!_',
+    );
+    triggerRestart({ projectDir, token, chatId });
+    return true;
+  }
+
+  // 2. List windows/apps
+  if (/^(?:(?:a[çc][ıi]k\s+)?(?:pencereler|uygulamalar|pencereleri|uygulamalar[ıi])\s*(?:listele|g[öo]ster|neler|ne var)?|hangi\s+(?:pencereler|uygulamalar)\s+a[çc][ıi]k)$/i.test(t)) {
+    await sendChatAction(token, chatId, 'typing');
+    const wins = await windowManager.listWindows();
+    if (!wins.length) {
+      await safeSendMessage(token, chatId, '🪟 Masaüstünde açık pencere bulunamadı choom.');
+      return true;
+    }
+    const lines = wins.map((w, idx) => `*${idx + 1}.* [${w.process || 'app'}] *${w.title}* (${w.minimized ? 'Simge Durumu' : w.maximized ? 'Tam Ekran' : 'Normal'})`);
+    await sendLongMessage(token, chatId, `🪟 *Açık Uygulamalar & Pencereler:*\n\n${lines.join('\n')}\n\n_Yönetmek için: \`/min <isim>\`, \`/max <isim>\`, \`/resize <isim> <w> <h>\`, \`/close <isim>\`, \`/open <isim>\`_`);
+    return true;
+  }
+
+  // 3. Minimize
+  const minMatch = t.match(/^(.+?)\s*(?:uygulamas[ıi]n[ıi]|penceresini)?\s*(?:simge durumuna k[üu][çc][üu]lt|k[üu][çc][üu]lt)$/i);
+  if (minMatch && !minMatch[1].startsWith('/')) {
+    const target = minMatch[1].replace(/['’]?(?:y[ıi]n[ıi]|[ıi]n[ıi]|y[uü]n[üu]|[uü]n[üu]|y[eе]n[eе]|[eе]n[eе]|y[aа]n[aа]|[aа]n[aа])$/i, '').trim();
+    if (target.length >= 2) {
+      try {
+        const res = await windowManager.minimizeWindow(target);
+        await safeSendMessage(token, chatId, `📉 *${res.window.title}* simge durumuna küçültüldü choom!`);
+        return true;
+      } catch {}
+    }
+  }
+
+  // 4. Maximize
+  const maxMatch = t.match(/^(.+?)\s*(?:uygulamas[ıi]n[ıi]|penceresini)?\s*(?:tam ekran yap|b[üu]y[üu]t)$/i);
+  if (maxMatch && !maxMatch[1].startsWith('/')) {
+    const target = maxMatch[1].replace(/['’]?(?:y[ıi]n[ıi]|[ıi]n[ıi]|y[uü]n[üu]|[uü]n[üu]|y[eе]n[eе]|[eе]n[eе]|y[aа]n[aа]|[aа]n[aа])$/i, '').trim();
+    if (target.length >= 2) {
+      try {
+        const res = await windowManager.maximizeWindow(target);
+        await safeSendMessage(token, chatId, `📈 *${res.window.title}* tam ekran yapıldı choom!`);
+        return true;
+      } catch {}
+    }
+  }
+
+  // 5. Close
+  const closeMatch = t.match(/^(.+?)\s*(?:uygulamas[ıi]n[ıi]|penceresini)?\s*(?:kapat|sonland[ıi]r)$/i);
+  if (closeMatch && !closeMatch[1].startsWith('/')) {
+    const target = closeMatch[1].replace(/['’]?(?:y[ıi]n[ıi]|[ıi]n[ıi]|y[uü]n[üu]|[uü]n[üu]|y[eе]n[eе]|[eе]n[eе]|y[aа]n[aа]|[aа]n[aа])$/i, '').trim();
+    if (target.length >= 2) {
+      try {
+        const res = await windowManager.closeWindow(target);
+        await safeSendMessage(token, chatId, `❌ *${res.window.title}* başarıyla kapatıldı choom!`);
+        return true;
+      } catch {}
+    }
+  }
+
+  // 6. Open / Focus
+  const openMatch = t.match(/^(.+?)\s*(?:uygulamas[ıi]n[ıi]|penceresini)?\s*(?:ana ekranda\s+)?(?:a[çc]|öne getir|ekrana getir)$/i);
+  if (openMatch && !openMatch[1].startsWith('/')) {
+    const target = openMatch[1].replace(/['’]?(?:y[ıi]n[ıi]|[ıi]n[ıi]|y[uü]n[üu]|[uü]n[üu]|y[eе]n[eе]|[eе]n[eе]|y[aа]n[aа]|[aа]n[aа])$/i, '').trim();
+    if (target.length >= 2) {
+      try {
+        const res = await windowManager.openOrFocusApp(target, { launchModule: chatContext.launch });
+        await safeSendMessage(token, chatId, `🖥️ ${res.message}`);
+        return true;
+      } catch {}
+    }
+  }
+
+  return false;
+}
+
 // Handle an incoming update message with STRICT whitelist check
 async function handleMessage(msg) {
   if (!msg || !msg.from) return;
@@ -238,13 +381,24 @@ async function handleMessage(msg) {
         'Project Capricorn yapay zeka yapısıyım, masaüstünde yaşıyorum. Şimdi telefonundan hem benimle konuşabilir hem de *Antigravity* ve *Terminalini* doğrudan yönetebilirsin!',
         '',
         '🚀 *Antigravity & Kodlama:*',
-        '🤖 `/code <görev>` - Antigravity AI ile projede kod yazdırır',
+        '🤖 `/code <görev>` - Antigravity kod sessionu başlatır ve tüm değişiklikleri Telegram\'a yazar',
+        '🛑 `/code stop` - Aktif Antigravity kod sessionunu sonlandırır',
         '🖥️ `/ide` - Antigravity editör ve pencere durumunu gösterir',
         '📄 `/file <yol>` - Projedeki dosyayı okur ve telefonda gösterir',
         '✍️ `/write <yol> <kod>` - Projeye dosya yazar/kaydeder',
         '🌿 `/git [status/diff/log]` - Hızlı git komutları çalıştırır',
         '',
+        '🪟 *Açık Uygulamalar & Pencere Yönetimi:*',
+        '📋 `/apps` (veya `/windows`) - Açık uygulamaları ve pencereleri listeler',
+        '🖥️ `/open <isim>` (veya `/focus`) - Uygulamayı ana ekranda öne açar veya başlatır',
+        '📉 `/min <isim>` - Pencereyi simge durumuna küçültür',
+        '📈 `/max <isim>` - Pencereyi tam ekran yapar',
+        '🪟 `/restore <isim>` - Pencereyi önceki normal boyutuna getirir',
+        '📐 `/resize <isim> <w> <h>` - Pencere boyutunu değiştirir (örn: `/resize chrome 1280 720` veya `half-left`)',
+        '❌ `/close <isim>` - Pencereyi/uygulamayı kapatır (zorla için `/kill <isim>`)',
+        '',
         '💻 *Terminal & Bilgisayar Kontrolü:*',
+        '🔄 `/restart` - Terminal oturumunu otomatik durdurup `npm run dev` ile yeniden başlatır',
         '⚡ `/sh <komut>` - Proje dizininde PowerShell/Terminal komutu çalıştırır',
         '📸 `/screenshot` - Masaüstünün tam ekran görüntüsünü atar',
         '🔍 `/inspect` - Ekranda ne olduğunu analiz eder',
@@ -353,6 +507,246 @@ async function handleMessage(msg) {
       return;
     }
 
+    // ----------------- YENİDEN BAŞLATMA (RESTART) -----------------
+    if (cmd === '/restart' || cmd === '/reboot') {
+      const projectDir = cfg.claudeCwd || path.resolve(__dirname, '..', '..');
+      await safeSendMessage(
+        token,
+        chatId,
+        [
+          '🔄 *Capri Yeniden Başlatılıyor...*',
+          '',
+          '📋 *Sıralama Önceden Belirlendi (Detached Launcher):*',
+          '1️⃣ Mevcut terminal oturumu sonlandırılıyor...',
+          '2️⃣ Portlar ve kilitler temizleniyor...',
+          '3️⃣ Yeni PowerShell terminal oturumunda `npm run dev` başlatılıyor...',
+          '',
+          '_Lütfen birkaç saniye bekle choom, bot birazdan tekrar aktif olacak!_',
+        ].join('\n'),
+      );
+
+      triggerRestart({
+        projectDir,
+        token,
+        chatId,
+      });
+      return;
+    }
+
+    // ----------------- AÇIK UYGULAMALAR & PENCERE YÖNETİMİ -----------------
+    if (cmd === '/apps' || cmd === '/windows' || cmd === '/wins' || cmd === '/ps') {
+      await sendChatAction(token, chatId, 'typing');
+      try {
+        const wins = await windowManager.listWindows();
+        if (!wins.length) {
+          await safeSendMessage(token, chatId, '🪟 Masaüstünde açık pencere bulunamadı.');
+          return;
+        }
+
+        const lines = [
+          `🪟 *Açık Uygulamalar & Pencereler (${wins.length}):*`,
+          '',
+        ];
+
+        wins.forEach((w, idx) => {
+          const num = idx + 1;
+          let state = '⚪ Normal';
+          if (w.active) state = '🟢 Aktif / Ön Planda';
+          else if (w.minimized) state = '🟡 Simge Durumunda';
+          else if (w.maximized) state = '🔵 Tam Ekran';
+
+          const proc = w.process ? `[${w.process}] ` : '';
+          const dims = (!w.minimized && w.w > 0) ? ` (${w.w}x${w.h})` : '';
+          lines.push(`*${num}.* ${proc}*${w.title}*${dims}\n    ↳ Durum: ${state} (PID: \`${w.pid}\`, HWND: \`${w.hwnd}\`)`);
+        });
+
+        lines.push('');
+        lines.push('💡 *Pencere Yönetim Komutları:*');
+        lines.push('• Ana Ekranda Aç / Getir: `/open <isim veya no>`');
+        lines.push('• Simge Durumuna Küçült: `/min <isim veya no>`');
+        lines.push('• Tam Ekran Yap: `/max <isim veya no>`');
+        lines.push('• Normal Boyut: `/restore <isim veya no>`');
+        lines.push('• Boyutunu Değiş: `/resize <hedef> <genişlik> <yükseklik>`');
+        lines.push('• Kapat: `/close <isim veya no>` (Zorla için `/kill`)');
+
+        await sendLongMessage(token, chatId, lines.join('\n'));
+      } catch (err) {
+        await safeSendMessage(token, chatId, `❌ Pencereler listelenemedi: ${err.message}`);
+      }
+      return;
+    }
+
+    if (cmd === '/open' || cmd === '/focus' || cmd === '/bring') {
+      const target = args.join(' ').trim();
+      if (!target) {
+        await safeSendMessage(token, chatId, 'Kullanım: `/open <uygulama adı veya pencere no>`\nÖrn: `/open chrome` veya `/open 1`');
+        return;
+      }
+
+      await sendChatAction(token, chatId, 'typing');
+      try {
+        const result = await windowManager.openOrFocusApp(target, { launchModule: chatContext.launch });
+        await safeSendMessage(token, chatId, `🖥️ *Açık Uygulama Ana Ekranda Açıldı!*\n\n${result.message}`);
+      } catch (err) {
+        await safeSendMessage(token, chatId, `❌ Uygulama açılamadı: ${err.message}`);
+      }
+      return;
+    }
+
+    if (cmd === '/close' || cmd === '/kill') {
+      const force = cmd === '/kill' || args.includes('--force') || args.includes('-f');
+      const target = args.filter((a) => !a.startsWith('-')).join(' ').trim();
+      if (!target) {
+        await safeSendMessage(token, chatId, 'Kullanım: `/close <uygulama/pencere adı veya no>` (Zorla kapatmak için: `/kill <hedef>`)');
+        return;
+      }
+
+      await sendChatAction(token, chatId, 'typing');
+      try {
+        const res = await windowManager.closeWindow(target, { force });
+        await safeSendMessage(token, chatId, `✅ *Kapatıldı:* \`${res.window.title}\` ${res.forced ? '*(Zorla sonlandırıldı)*' : ''}`);
+      } catch (err) {
+        try {
+          const appRes = await apps.close(target, { force });
+          await safeSendMessage(token, chatId, appRes.running ? '⚠️ Uygulama kapatma sinyali gönderildi.' : '✅ Uygulama başarıyla kapatıldı.');
+        } catch {
+          await safeSendMessage(token, chatId, `❌ Kapatma başarısız: ${err.message}`);
+        }
+      }
+      return;
+    }
+
+    if (cmd === '/min' || cmd === '/minimize') {
+      const target = args.join(' ').trim();
+      if (!target) {
+        await safeSendMessage(token, chatId, 'Kullanım: `/min <pencere adı veya no>`\nÖrn: `/min chrome` veya `/min 2`');
+        return;
+      }
+
+      await sendChatAction(token, chatId, 'typing');
+      try {
+        const res = await windowManager.minimizeWindow(target);
+        await safeSendMessage(token, chatId, `📉 *Pencere Simge Durumuna Küçültüldü:*\n\`${res.window.title}\``);
+      } catch (err) {
+        await safeSendMessage(token, chatId, `❌ İşlem başarısız: ${err.message}`);
+      }
+      return;
+    }
+
+    if (cmd === '/max' || cmd === '/maximize') {
+      const target = args.join(' ').trim();
+      if (!target) {
+        await safeSendMessage(token, chatId, 'Kullanım: `/max <pencere adı veya no>`\nÖrn: `/max chrome` veya `/max 1`');
+        return;
+      }
+
+      await sendChatAction(token, chatId, 'typing');
+      try {
+        const res = await windowManager.maximizeWindow(target);
+        await safeSendMessage(token, chatId, `📈 *Pencere Tam Ekran Yapıldı:*\n\`${res.window.title}\``);
+      } catch (err) {
+        await safeSendMessage(token, chatId, `❌ İşlem başarısız: ${err.message}`);
+      }
+      return;
+    }
+
+    if (cmd === '/restore' || cmd === '/normal') {
+      const target = args.join(' ').trim();
+      if (!target) {
+        await safeSendMessage(token, chatId, 'Kullanım: `/restore <pencere adı veya no>`');
+        return;
+      }
+
+      await sendChatAction(token, chatId, 'typing');
+      try {
+        const res = await windowManager.restoreWindow(target);
+        await safeSendMessage(token, chatId, `🪟 *Pencere Normal Boyutuna Getirildi:*\n\`${res.window.title}\``);
+      } catch (err) {
+        await safeSendMessage(token, chatId, `❌ İşlem başarısız: ${err.message}`);
+      }
+      return;
+    }
+
+    if (cmd === '/resize') {
+      if (args.length < 2) {
+        await safeSendMessage(token, chatId, [
+          'Kullanım: `/resize <hedef> <genişlik> [yükseklik]` veya `/resize <hedef> <önayar>`',
+          '',
+          'Örnekler:',
+          '• `/resize chrome 1280 720`',
+          '• `/resize 1 half-left` (Ekranın sol yarısı)',
+          '• `/resize 1 half-right` (Ekranın sağ yarısı)',
+          '• `/resize 1 center` (Merkeze 1280x800)',
+          '• `/resize 1 720p` veya `1080p`',
+        ].join('\n'));
+        return;
+      }
+
+      const target = args[0];
+      const wArg = args[1];
+      const hArg = args[2] ? Number(args[2]) : 0;
+
+      await sendChatAction(token, chatId, 'typing');
+      try {
+        const res = await windowManager.resizeWindow(target, wArg, hArg);
+        const b = res.bounds;
+        await safeSendMessage(token, chatId, `📐 *Pencere Boyutu Değiştirildi:*\n\`${res.window.title}\`\n↳ Yeni Boyut: ${b.w}x${b.h}${b.x >= 0 ? ` (Konum: x=${b.x}, y=${b.y})` : ''}`);
+      } catch (err) {
+        await safeSendMessage(token, chatId, `❌ Boyut değiştirilemedi: ${err.message}`);
+      }
+      return;
+    }
+
+    if (cmd === '/win' || cmd === '/window') {
+      const sub = (args[0] || 'list').toLowerCase();
+      const subArgs = args.slice(1);
+
+      if (sub === 'list') {
+        const wins = await windowManager.listWindows();
+        if (!wins.length) {
+          await safeSendMessage(token, chatId, '🪟 Masaüstünde açık pencere bulunamadı.');
+          return;
+        }
+        const lines = wins.map((w, idx) => `*${idx + 1}.* [${w.process || 'app'}] *${w.title}* (${w.minimized ? 'Simge Durumu' : w.maximized ? 'Tam Ekran' : 'Normal'})`);
+        await sendLongMessage(token, chatId, `🪟 *Açık Pencereler:*\n\n${lines.join('\n')}`);
+        return;
+      }
+      if (sub === 'min' || sub === 'minimize') {
+        const res = await windowManager.minimizeWindow(subArgs.join(' '));
+        await safeSendMessage(token, chatId, `📉 *Küçültüldü:* \`${res.window.title}\``);
+        return;
+      }
+      if (sub === 'max' || sub === 'maximize') {
+        const res = await windowManager.maximizeWindow(subArgs.join(' '));
+        await safeSendMessage(token, chatId, `📈 *Tam Ekran Yapıldı:* \`${res.window.title}\``);
+        return;
+      }
+      if (sub === 'restore' || sub === 'normal') {
+        const res = await windowManager.restoreWindow(subArgs.join(' '));
+        await safeSendMessage(token, chatId, `🪟 *Normal Boyut:* \`${res.window.title}\``);
+        return;
+      }
+      if (sub === 'close' || sub === 'kill') {
+        const force = sub === 'kill' || subArgs.includes('--force');
+        const res = await windowManager.closeWindow(subArgs.filter((a) => !a.startsWith('-')).join(' '), { force });
+        await safeSendMessage(token, chatId, `✅ *Kapatıldı:* \`${res.window.title}\``);
+        return;
+      }
+      if (sub === 'resize') {
+        const res = await windowManager.resizeWindow(subArgs[0], subArgs[1], Number(subArgs[2]) || 0);
+        await safeSendMessage(token, chatId, `📐 *Boyut Değiştirildi:* \`${res.window.title}\``);
+        return;
+      }
+      if (sub === 'focus' || sub === 'open') {
+        const res = await windowManager.openOrFocusApp(subArgs.join(' '), { launchModule: chatContext.launch });
+        await safeSendMessage(token, chatId, `🖥️ ${res.message}`);
+        return;
+      }
+
+      await safeSendMessage(token, chatId, 'Kullanım: `/win [list|min|max|restore|resize|close|focus] <hedef>`');
+      return;
+    }
+
     // ----------------- TERMINAL KONTROLÜ -----------------
     if (cmd === '/sh' || cmd === '/term' || cmd === '/cmd') {
       const command = args.join(' ').trim();
@@ -387,15 +781,70 @@ async function handleMessage(msg) {
       return;
     }
 
-    // ----------------- ANTIGRAVITY AI KOD YAZDIRMA -----------------
+    // ----------------- ANTIGRAVITY AI KOD SESSIONU -----------------
     if (cmd === '/code' || cmd === '/agy') {
-      const task = args.join(' ').trim();
-      if (!task) {
-        await safeSendMessage(token, chatId, 'Kullanım: `/code <kodlama görevi>`\nÖrn: `/code src/main/config.js içine yeni bir alan ekle`');
+      const sub = (args[0] || '').toLowerCase();
+      if (sub === 'stop' || sub === 'end' || sub === 'bitir') {
+        if (isTelegramCodeSessionActive()) {
+          stopTelegramCodeSession();
+          await safeSendMessage(token, chatId, '🛑 *Antigravity Kod Sessionu Sonlandırıldı.* Artık değişiklikler Telegram\'a aktarılmayacak.');
+        } else {
+          await safeSendMessage(token, chatId, 'ℹ️ Şu anda aktif bir Telegram kod sessionu bulunmuyor.');
+        }
         return;
       }
 
-      await safeSendMessage(token, chatId, `🤖 *Antigravity Kodlama Görevi Başlatıldı:*\n\n_"${task}"_\n\nKod yazılıyor, lütfen bekle...`);
+      if (sub === 'status' || sub === 'durum') {
+        if (isTelegramCodeSessionActive()) {
+          const sess = activeTelegramCodeSession;
+          const elapsedMin = Math.floor((Date.now() - sess.startTime) / 60000);
+          await safeSendMessage(token, chatId, [
+            '🤖 *Aktif Antigravity Kod Sessionu*',
+            `• *Görev:* _"${sess.task}"_`,
+            `• *Geçen Süre:* ${elapsedMin} dakika`,
+            `• *Düzenlenen Dosyalar:* ${sess.files.length}`,
+            `• *Çalıştırılan Komutlar:* ${sess.commands.length}`,
+            '',
+            'Sessionu bitirmek için: `/code stop`',
+          ].join('\n'));
+        } else {
+          await safeSendMessage(token, chatId, '⚪ Şu anda aktif bir Telegram kod sessionu bulunmuyor.\nYeni bir session başlatmak için: `/code <görev>`');
+        }
+        return;
+      }
+
+      const task = (sub === 'start' ? args.slice(1) : args).join(' ').trim();
+      if (!task) {
+        await safeSendMessage(token, chatId, [
+          '🤖 *Antigravity Kodlama Sessionu*',
+          '',
+          'Kullanım:',
+          '• `/code <görev>` - Yeni bir kodlama sessionu başlatır ve Antigravity değişikliklerini canlı olarak buraya yazar.',
+          '• `/code status` - Aktif session durumunu gösterir.',
+          '• `/code stop` - Aktif sessionu sonlandırır.',
+          '',
+          'Örnek: `/code src/main/config.js içine yeni bir alan ekle`',
+        ].join('\n'));
+        return;
+      }
+
+      // Start the Telegram-initiated code session!
+      startTelegramCodeSession(chatId, token, task);
+
+      await safeSendMessage(
+        token,
+        chatId,
+        [
+          '🚀 *Antigravity Kod Sessionu Başlatıldı!*',
+          '',
+          `📝 *Görev:* _"${task}"_`,
+          '',
+          '📡 *Canlı Akış:* Bu session Telegram\'dan başlatıldığı için Antigravity\'nin yaptığı tüm dosya düzenlemeleri, yeni dosyalar ve komutlar anlık olarak buraya yazılacak.',
+          '',
+          '_Antigravity kod yazıyor, lütfen bekle..._',
+        ].join('\n'),
+      );
+
       await sendChatAction(token, chatId, 'typing');
       const typingInterval = setInterval(() => {
         sendChatAction(token, chatId, 'typing').catch(() => {});
@@ -563,6 +1012,11 @@ async function handleMessage(msg) {
       await safeSendMessage(token, chatId, '🧹 Sohbet geçmişimiz sıfırlandı, choom. Yeni bir sayfa açtık!');
       return;
     }
+  }
+
+  // 2.5. Natural Language Commands (Windows & App management, Restart)
+  if (await handleNaturalLanguageAction(text, token, chatId, cfg)) {
+    return;
   }
 
   // 3. AUTHORIZED USER: Normal AI Chat with Capri
@@ -742,18 +1196,77 @@ function reload() {
 
 // Proactive notification when Claude Code / Antigravity triggers events
 async function notifyClaudeEvent(evt) {
-  const cfg = chatContext?.config?.load();
+  const cfg = chatContext?.config?.load?.() || {};
+  const name = evt.hook_event_name;
+  const isAgy = evt.session_id?.startsWith('agy:') || (!evt.session_id?.startsWith('claude:') && cfg.assistant === 'agy');
+  const isCodex = evt.session_id?.startsWith('codex:') || (!evt.session_id?.startsWith('claude:') && cfg.assistant === 'codex');
+  const agentName = isAgy ? 'Antigravity' : isCodex ? 'Codex' : 'Claude Code';
+
+  // 1. SADECE TELEGRAMDAN BAŞLATILMIŞSA: Kod sessionu değişikliklerini anlık olarak Telegram'a yaz!
+  if (activeTelegramCodeSession?.active) {
+    const token = activeTelegramCodeSession.token || cfg.telegram?.token;
+    const codeChatId = activeTelegramCodeSession.chatId || cfg.telegram?.allowedUserId;
+
+    try {
+      if (name === 'PostToolUse') {
+        const toolName = evt.tool_name || '';
+        const input = evt.tool_input || {};
+
+        if (toolName === 'Edit') {
+          const filePath = input.file_path || 'Bilinmeyen Dosya';
+          activeTelegramCodeSession.files.push(filePath);
+          let changeMsg = `✏️ *[Antigravity] Dosya Düzenlendi:*\n\`${filePath}\``;
+          if (input.replacement_snippet) {
+            changeMsg += `\n\`\`\`\n${input.replacement_snippet.slice(0, 1000)}\n\`\`\``;
+          }
+          if (token && codeChatId) await safeSendMessage(token, codeChatId, changeMsg).catch(() => {});
+        } else if (toolName === 'Write') {
+          const filePath = input.file_path || 'Bilinmeyen Dosya';
+          activeTelegramCodeSession.files.push(filePath);
+          let changeMsg = `📝 *[Antigravity] Dosya Yazıldı:*\n\`${filePath}\` (${input.content_len || 0} bayt)`;
+          if (input.content_snippet) {
+            changeMsg += `\n\`\`\`\n${input.content_snippet.slice(0, 1000)}\n\`\`\``;
+          }
+          if (token && codeChatId) await safeSendMessage(token, codeChatId, changeMsg).catch(() => {});
+        } else if (toolName === 'PowerShell') {
+          const cmd = input.command || input.description || '';
+          activeTelegramCodeSession.commands.push(cmd);
+          if (token && codeChatId) await safeSendMessage(token, codeChatId, `⚡ *[Antigravity] Komut Çalıştırıldı:*\n\`${cmd}\``).catch(() => {});
+        }
+      } else if (name === 'PostToolUseFailure') {
+        const toolName = evt.tool_name || 'İşlem';
+        if (token && codeChatId) await safeSendMessage(token, codeChatId, `⚠️ *[Antigravity] Araç Hatası:* \`${toolName}\`\n${evt.error || 'Bilinmeyen hata'}`).catch(() => {});
+      } else if (name === 'Stop') {
+        const summary = evt.last_assistant_message || evt.message || 'Antigravity kodlama görevini tamamladı.';
+        const uniqueFiles = [...new Set(activeTelegramCodeSession.files)];
+        const fileList = uniqueFiles.length > 0
+          ? `\n\n📂 *Değiştirilen Dosyalar (${uniqueFiles.length}):*\n${uniqueFiles.map((f) => `• \`${f}\``).join('\n')}`
+          : '';
+        activeTelegramCodeSession.active = false;
+        if (token && codeChatId) {
+          await sendLongMessage(token, codeChatId, `🏁 *Antigravity Kod Sessionu Tamamlandı!*${fileList}\n\n${summary}`).catch(() => {});
+        }
+        return;
+      } else if (name === 'StopFailure') {
+        const err = evt.error || evt.message || 'Bir hata oluştu.';
+        activeTelegramCodeSession.active = false;
+        if (token && codeChatId) {
+          await safeSendMessage(token, codeChatId, `❌ *Antigravity Kod Sessionu Durduruldu (Hata):*\n\n${err}`).catch(() => {});
+        }
+        return;
+      }
+    } catch (err) {
+      console.error('[telegram] Code session notify error:', err.message);
+    }
+  }
+
+  // 2. Normal bildirimler (Telegram'dan kod sessionu başlatılmamışsa sadece tamamlanma/uyarı)
   if (!cfg?.telegram?.enabled || !cfg?.telegram?.token || !cfg?.telegram?.allowedUserId || cfg?.telegram?.notifyClaude === false) {
     return;
   }
 
-  const name = evt.hook_event_name;
   const token = cfg.telegram.token;
   const chatId = cfg.telegram.allowedUserId;
-
-  const isAgy = evt.session_id?.startsWith('agy:') || (!evt.session_id?.startsWith('claude:') && cfg.assistant === 'agy');
-  const isCodex = evt.session_id?.startsWith('codex:') || (!evt.session_id?.startsWith('claude:') && cfg.assistant === 'codex');
-  const agentName = isAgy ? 'Antigravity' : isCodex ? 'Codex' : 'Claude Code';
 
   try {
     if (name === 'Stop') {
@@ -779,6 +1292,7 @@ function getStatus() {
     allowedUserId: cfg.allowedUserId || null,
     enabled: Boolean(cfg.enabled),
     hasToken: Boolean(cfg.token),
+    codeSessionActive: isTelegramCodeSessionActive(),
   };
 }
 
@@ -791,4 +1305,9 @@ module.exports = {
   getActivePairing,
   notifyClaudeEvent,
   captureScreenshot,
+  isTelegramCodeSessionActive,
+  startTelegramCodeSession,
+  stopTelegramCodeSession,
+  triggerRestart,
+  windowManager,
 };
